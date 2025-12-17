@@ -25,11 +25,34 @@ type Archive struct {
 	Hashes []string `json:"hashes,omitempty"`
 }
 
+// RegistryVersionsResponse is the full response from the registry /versions API
+type RegistryVersionsResponse struct {
+	Versions []RegistryVersion `json:"versions"`
+}
+
+// RegistryVersion represents a single version in the registry versions response
+type RegistryVersion struct {
+	Version   string             `json:"version"`
+	Platforms []RegistryPlatform `json:"platforms"`
+}
+
+// RegistryPlatform represents a platform in the registry versions response
+type RegistryPlatform struct {
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+}
+
+// DownloadInfo holds the download metadata from registry
+type DownloadInfo struct {
+	DownloadURL string `json:"download_url"`
+	Shasum      string `json:"shasum"`
+}
+
 // ProviderAddress represents a provider's network address
 type ProviderAddress struct {
-	Hostname string
+	Hostname  string
 	Namespace string
-	Type     string
+	Type      string
 }
 
 // ParseProviderAddress parses a provider registry address like "registry.terraform.io/hashicorp/aws"

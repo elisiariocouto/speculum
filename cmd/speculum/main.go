@@ -63,6 +63,7 @@ func main() {
 		cfg.UpstreamRegistry,
 		cfg.UpstreamTimeout,
 		cfg.MaxRetries,
+		log,
 	)
 
 	// Initialize mirror service

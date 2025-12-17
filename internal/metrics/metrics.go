@@ -10,7 +10,7 @@ import (
 // Metrics holds all Prometheus metrics
 type Metrics struct {
 	// HTTP request metrics
-	HTTPRequestsTotal  prometheus.CounterVec
+	HTTPRequestsTotal   prometheus.CounterVec
 	HTTPRequestDuration prometheus.HistogramVec
 	HTTPRequestSize     prometheus.HistogramVec
 	HTTPResponseSize    prometheus.HistogramVec
@@ -20,9 +20,9 @@ type Metrics struct {
 	CacheMissesTotal prometheus.CounterVec
 
 	// Upstream metrics
-	UpstreamRequestsTotal    prometheus.CounterVec
-	UpstreamRequestDuration  prometheus.HistogramVec
-	UpstreamErrors           prometheus.CounterVec
+	UpstreamRequestsTotal   prometheus.CounterVec
+	UpstreamRequestDuration prometheus.HistogramVec
+	UpstreamErrors          prometheus.CounterVec
 
 	// Storage metrics
 	StorageOperationsTotal   prometheus.CounterVec

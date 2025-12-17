@@ -10,20 +10,18 @@ import (
 // MemoryStorage implements Storage using an in-memory map
 // Useful for testing without filesystem dependencies
 type MemoryStorage struct {
-	mu           sync.RWMutex
-	data         map[string][]byte
-	archives     map[string][]byte
-	h1Hashes     map[string]string
-	upstreamURLs map[string]string
+	mu                sync.RWMutex
+	data              map[string][]byte
+	archives          map[string][]byte
+	versionsResponses map[string][]byte
 }
 
 // NewMemoryStorage creates a new in-memory storage backend
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		data:         make(map[string][]byte),
-		archives:     make(map[string][]byte),
-		h1Hashes:     make(map[string]string),
-		upstreamURLs: make(map[string]string),
+		data:              make(map[string][]byte),
+		archives:          make(map[string][]byte),
+		versionsResponses: make(map[string][]byte),
 	}
 }
 
@@ -88,6 +86,18 @@ func (m *MemoryStorage) ExistsArchive(ctx context.Context, path string) (bool, e
 	return ok, nil
 }
 
+// GetVersionsResponse retrieves the cached full versions API response
+func (m *MemoryStorage) GetVersionsResponse(ctx context.Context, hostname, namespace, providerType string) ([]byte, error) {
+	key := versionsResponseKey(hostname, namespace, providerType)
+	return m.get(key)
+}
+
+// PutVersionsResponse stores the full versions API response
+func (m *MemoryStorage) PutVersionsResponse(ctx context.Context, hostname, namespace, providerType string, data []byte) error {
+	key := versionsResponseKey(hostname, namespace, providerType)
+	return m.put(key, data)
+}
+
 // Helper functions
 
 func indexKey(hostname, namespace, providerType string) string {
@@ -96,6 +106,10 @@ func indexKey(hostname, namespace, providerType string) string {
 
 func versionKey(hostname, namespace, providerType, version string) string {
 	return "version:" + hostname + ":" + namespace + ":" + providerType + ":" + version
+}
+
+func versionsResponseKey(hostname, namespace, providerType string) string {
+	return "versions_response:" + hostname + ":" + namespace + ":" + providerType
 }
 
 func (m *MemoryStorage) get(key string) ([]byte, error) {
@@ -117,53 +131,11 @@ func (m *MemoryStorage) put(key string, data []byte) error {
 	return nil
 }
 
-// GetH1Hash retrieves the h1: hash for an archive
-func (m *MemoryStorage) GetH1Hash(ctx context.Context, path string) (string, error) {
-	m.mu.RLock()
-	hash, ok := m.h1Hashes[path]
-	m.mu.RUnlock()
-
-	if !ok {
-		return "", nil // Hash not found is not an error
-	}
-
-	return hash, nil
-}
-
-// PutH1Hash stores the h1: hash for an archive
-func (m *MemoryStorage) PutH1Hash(ctx context.Context, path string, h1Hash string) error {
-	m.mu.Lock()
-	m.h1Hashes[path] = h1Hash
-	m.mu.Unlock()
-	return nil
-}
-
-// GetUpstreamURL retrieves the upstream URL for an archive
-func (m *MemoryStorage) GetUpstreamURL(ctx context.Context, path string) (string, error) {
-	m.mu.RLock()
-	url, ok := m.upstreamURLs[path]
-	m.mu.RUnlock()
-
-	if !ok {
-		return "", nil // Not found is not an error
-	}
-	return url, nil
-}
-
-// PutUpstreamURL stores the upstream URL for an archive
-func (m *MemoryStorage) PutUpstreamURL(ctx context.Context, path string, upstreamURL string) error {
-	m.mu.Lock()
-	m.upstreamURLs[path] = upstreamURL
-	m.mu.Unlock()
-	return nil
-}
-
 // Clear removes all data from memory storage (useful for testing)
 func (m *MemoryStorage) Clear() {
 	m.mu.Lock()
 	m.data = make(map[string][]byte)
 	m.archives = make(map[string][]byte)
-	m.h1Hashes = make(map[string]string)
-	m.upstreamURLs = make(map[string]string)
+	m.versionsResponses = make(map[string][]byte)
 	m.mu.Unlock()
 }

@@ -111,6 +111,18 @@ func (fs *FilesystemStorage) ExistsArchive(ctx context.Context, path string) (bo
 	return false, err
 }
 
+// GetVersionsResponse retrieves the cached full versions API response
+func (fs *FilesystemStorage) GetVersionsResponse(ctx context.Context, hostname, namespace, providerType string) ([]byte, error) {
+	path := fs.versionsResponsePath(hostname, namespace, providerType)
+	return fs.readFile(ctx, path)
+}
+
+// PutVersionsResponse stores the full versions API response
+func (fs *FilesystemStorage) PutVersionsResponse(ctx context.Context, hostname, namespace, providerType string, data []byte) error {
+	path := fs.versionsResponsePath(hostname, namespace, providerType)
+	return fs.writeFileAtomic(ctx, path, data)
+}
+
 // Helper methods
 
 // indexPath constructs the filesystem path for an index.json file
@@ -137,6 +149,19 @@ func (fs *FilesystemStorage) versionPath(hostname, namespace, providerType, vers
 	)
 }
 
+// versionsResponsePath constructs the filesystem path for the full versions API response
+// Stored in internal cache: .speculum-internal/hostname/namespace/type/versions.json
+func (fs *FilesystemStorage) versionsResponsePath(hostname, namespace, providerType string) string {
+	return filepath.Join(
+		fs.cacheDir,
+		".speculum-internal",
+		hostname,
+		namespace,
+		providerType,
+		"versions.json",
+	)
+}
+
 // archivePath constructs the filesystem path for an archive file
 // Archives are stored alongside metadata: hostname/namespace/type/archives/...
 func (fs *FilesystemStorage) archivePath(path string) string {
@@ -150,11 +175,6 @@ func (fs *FilesystemStorage) archivePath(path string) string {
 	}
 
 	return filepath.Join(fs.cacheDir, sanitized)
-}
-
-// h1HashPath constructs the filesystem path for storing an h1: hash file
-func (fs *FilesystemStorage) h1HashPath(archivePath string) string {
-	return fs.archivePath(archivePath) + ".h1"
 }
 
 // readFile reads a file from disk
@@ -215,42 +235,4 @@ func (fs *FilesystemStorage) writeFileAtomic(ctx context.Context, path string, d
 	}
 
 	return nil
-}
-
-// GetH1Hash retrieves the h1: hash for an archive
-func (fs *FilesystemStorage) GetH1Hash(ctx context.Context, path string) (string, error) {
-	hashPath := fs.h1HashPath(path)
-	data, err := fs.readFile(ctx, hashPath)
-	if err != nil {
-		if err == io.EOF {
-			return "", nil // Hash not found is not an error
-		}
-		return "", err
-	}
-	return string(data), nil
-}
-
-// PutH1Hash stores the h1: hash for an archive
-func (fs *FilesystemStorage) PutH1Hash(ctx context.Context, path string, h1Hash string) error {
-	hashPath := fs.h1HashPath(path)
-	return fs.writeFileAtomic(ctx, hashPath, []byte(h1Hash))
-}
-
-// GetUpstreamURL retrieves the upstream URL for an archive
-func (fs *FilesystemStorage) GetUpstreamURL(ctx context.Context, path string) (string, error) {
-	urlPath := fs.archivePath(path) + ".upstream"
-	data, err := fs.readFile(ctx, urlPath)
-	if err != nil {
-		if err == io.EOF {
-			return "", nil // URL not found is not an error
-		}
-		return "", err
-	}
-	return string(data), nil
-}
-
-// PutUpstreamURL stores the upstream URL for an archive
-func (fs *FilesystemStorage) PutUpstreamURL(ctx context.Context, path string, upstreamURL string) error {
-	urlPath := fs.archivePath(path) + ".upstream"
-	return fs.writeFileAtomic(ctx, urlPath, []byte(upstreamURL))
 }

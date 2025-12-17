@@ -5,20 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
 // UpstreamClient handles fetching from the upstream registry
 type UpstreamClient struct {
-	baseURL    string
-	httpClient *http.Client
-	maxRetries int
+	baseURL        string
+	httpClient     *http.Client
+	maxRetries     int
+	logger         *slog.Logger
+	discoveryCache *DiscoveryCache
 }
 
 // NewUpstreamClient creates a new upstream client
-func NewUpstreamClient(baseURL string, timeout time.Duration, maxRetries int) *UpstreamClient {
+func NewUpstreamClient(baseURL string, timeout time.Duration, maxRetries int, logger *slog.Logger) *UpstreamClient {
 	// Create HTTP client with connection pooling and timeouts
 	httpClient := &http.Client{
 		Timeout: timeout,
@@ -30,64 +34,121 @@ func NewUpstreamClient(baseURL string, timeout time.Duration, maxRetries int) *U
 		},
 	}
 
+	// Create discovery cache with 1 hour TTL
+	discoveryCache := NewDiscoveryCache(1*time.Hour, httpClient, logger)
+
 	return &UpstreamClient{
-		baseURL:    baseURL,
-		httpClient: httpClient,
-		maxRetries: maxRetries,
+		baseURL:        baseURL,
+		httpClient:     httpClient,
+		maxRetries:     maxRetries,
+		logger:         logger,
+		discoveryCache: discoveryCache,
 	}
+}
+
+// getProvidersEndpoint discovers and returns the providers.v1 API endpoint for a registry
+// Uses service discovery with caching
+func (uc *UpstreamClient) getProvidersEndpoint(ctx context.Context, hostname string) (string, error) {
+	// Try service discovery first
+	discovery, err := uc.discoveryCache.DiscoverServices(ctx, hostname)
+	if err != nil {
+		uc.logger.DebugContext(ctx, "service discovery failed, using fallback",
+			slog.String("hostname", hostname),
+			slog.String("error", err.Error()))
+		// Fallback: assume standard HTTPS endpoint
+		return fmt.Sprintf("https://%s", hostname), fmt.Errorf("service discovery failed: %w", err)
+	}
+
+	// The ProvidersV1 field contains a path (e.g., "/v1/providers/")
+	// We need to construct the full URL by combining with the hostname
+	providersPath := strings.TrimSuffix(discovery.ProvidersV1, "/")
+	fullURL := fmt.Sprintf("https://%s%s", hostname, providersPath)
+
+	return fullURL, nil
 }
 
 // FetchIndex fetches the index.json for a provider
-func (uc *UpstreamClient) FetchIndex(ctx context.Context, hostname, namespace, providerType string) (*IndexResponse, error) {
-	var url string
-
-	// Handle registry.terraform.io's native API format
-	if hostname == "registry.terraform.io" || uc.baseURL == "https://registry.terraform.io" {
-		// Use registry.terraform.io's v1 API: /v1/providers/:namespace/:type/versions
-		url = fmt.Sprintf("%s/v1/providers/%s/%s/versions", uc.baseURL, namespace, providerType)
-	} else {
-		// Use provider network mirror protocol format
+// Returns both the simplified IndexResponse and the full RegistryVersionsResponse
+func (uc *UpstreamClient) FetchIndex(ctx context.Context, hostname, namespace, providerType string) (*IndexResponse, *RegistryVersionsResponse, error) {
+	// Use service discovery to get the providers endpoint
+	endpoint, err := uc.getProvidersEndpoint(ctx, hostname)
+	if err != nil {
+		uc.logger.DebugContext(ctx, "service discovery failed, using fallback",
+			slog.String("hostname", hostname),
+			slog.String("error", err.Error()))
+		// Fallback to mirror protocol format
 		path := fmt.Sprintf("%s/%s/%s/index.json", hostname, namespace, providerType)
-		url = uc.buildURL(path)
+		url := uc.buildURL(path)
+
+		body, status, fetchErr := uc.fetch(ctx, url)
+		if fetchErr != nil {
+			return nil, nil, fetchErr
+		}
+
+		if status == http.StatusNotFound {
+			return nil, nil, ErrNotFound
+		}
+
+		if status != http.StatusOK {
+			return nil, nil, fmt.Errorf("unexpected status code: %d", status)
+		}
+
+		var response IndexResponse
+		if err := json.Unmarshal(body, &response); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse index response: %w", err)
+		}
+
+		return &response, nil, nil
 	}
+
+	// Use discovered providers.v1 endpoint
+	url := fmt.Sprintf("%s/%s/%s/versions", endpoint, namespace, providerType)
+
+	uc.logger.DebugContext(ctx, "fetching provider versions from upstream",
+		slog.String("url", url),
+		slog.String("hostname", hostname),
+		slog.String("namespace", namespace),
+		slog.String("type", providerType))
 
 	body, status, err := uc.fetch(ctx, url)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if status == http.StatusNotFound {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", status)
+		return nil, nil, fmt.Errorf("unexpected status code: %d", status)
 	}
 
-	// Convert registry.terraform.io API response to mirror protocol format
-	if hostname == "registry.terraform.io" || uc.baseURL == "https://registry.terraform.io" {
-		return uc.convertRegistryAPIToIndexResponse(body)
-	}
-
-	var response IndexResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse index response: %w", err)
-	}
-
-	return &response, nil
+	// Convert registry API response to mirror protocol format
+	return uc.convertRegistryAPIToIndexResponse(body)
 }
 
 // FetchVersion fetches the version.json for a specific provider version
+// For registries with service discovery, this returns ErrNotFound to signal
+// that version.json should be built from cached versions response
 func (uc *UpstreamClient) FetchVersion(ctx context.Context, hostname, namespace, providerType, version string) (*VersionResponse, error) {
-	// Handle registry.terraform.io's native API format
-	if hostname == "registry.terraform.io" || uc.baseURL == "https://registry.terraform.io" {
-		// Use Provider Registry Protocol to fetch platform-specific downloads
-		return uc.convertRegistryAPIToVersionResponse(ctx, namespace, providerType, version)
+	// Check if this registry supports service discovery
+	_, err := uc.getProvidersEndpoint(ctx, hostname)
+	if err == nil {
+		// Registry has service discovery - version.json should be built from cache
+		uc.logger.DebugContext(ctx, "registry uses service discovery, version will be built from cache",
+			slog.String("hostname", hostname),
+			slog.String("namespace", namespace),
+			slog.String("type", providerType),
+			slog.String("version", version))
+		return nil, ErrNotFound
 	}
 
-	// Use provider network mirror protocol format for other registries
+	// Fallback: use provider network mirror protocol format
 	path := fmt.Sprintf("%s/%s/%s/%s.json", hostname, namespace, providerType, version)
 	url := uc.buildURL(path)
+
+	uc.logger.DebugContext(ctx, "fetching version metadata from mirror protocol",
+		slog.String("url", url))
 
 	body, status, err := uc.fetch(ctx, url)
 	if err != nil {
@@ -211,16 +272,13 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 	return nil, lastStatus, fmt.Errorf("max retries exceeded for URL: %s", url)
 }
 
-// convertRegistryAPIToIndexResponse converts registry.terraform.io API response to mirror protocol IndexResponse
-func (uc *UpstreamClient) convertRegistryAPIToIndexResponse(data []byte) (*IndexResponse, error) {
-	var registryResponse struct {
-		Versions []struct {
-			Version string `json:"version"`
-		} `json:"versions"`
-	}
+// convertRegistryAPIToIndexResponse converts registry API response to mirror protocol IndexResponse
+// Also returns the full RegistryVersionsResponse for caching
+func (uc *UpstreamClient) convertRegistryAPIToIndexResponse(data []byte) (*IndexResponse, *RegistryVersionsResponse, error) {
+	var registryResponse RegistryVersionsResponse
 
 	if err := json.Unmarshal(data, &registryResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse registry API response: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse registry API response: %w", err)
 	}
 
 	// Convert to mirror protocol format
@@ -229,74 +287,52 @@ func (uc *UpstreamClient) convertRegistryAPIToIndexResponse(data []byte) (*Index
 		versions[v.Version] = struct{}{}
 	}
 
-	return &IndexResponse{
+	indexResponse := &IndexResponse{
 		Versions: versions,
-	}, nil
+	}
+
+	return indexResponse, &registryResponse, nil
 }
 
-// convertRegistryAPIToVersionResponse fetches platform-specific downloads using the Provider Registry Protocol
-// This requires making multiple requests to /v1/providers/:namespace/:type/:version/download/:os/:arch
-func (uc *UpstreamClient) convertRegistryAPIToVersionResponse(ctx context.Context, namespace, providerType, version string) (*VersionResponse, error) {
-	// Common platforms that Terraform providers typically support
-	// We try these and skip if they don't exist
-	platforms := [][2]string{
-		{"linux", "amd64"},
-		{"linux", "arm64"},
-		{"darwin", "amd64"},
-		{"darwin", "arm64"},
-		{"windows", "amd64"},
-		{"windows", "386"},
-		{"freebsd", "amd64"},
-		{"openbsd", "amd64"},
+// FetchDownloadURL fetches the download information for a specific provider version and platform
+func (uc *UpstreamClient) FetchDownloadURL(ctx context.Context, hostname, namespace, providerType, version, os, arch string) (*DownloadInfo, error) {
+	// Get providers endpoint via service discovery
+	endpoint, err := uc.getProvidersEndpoint(ctx, hostname)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover services: %w", err)
 	}
 
-	archives := make(map[string]Archive)
+	// Build download API URL: {endpoint}/{namespace}/{type}/{version}/download/{os}/{arch}
+	url := fmt.Sprintf("%s/%s/%s/%s/download/%s/%s",
+		endpoint, namespace, providerType, version, os, arch)
 
-	// Fetch download info for each platform
-	for _, platform := range platforms {
-		os, arch := platform[0], platform[1]
-		downloadURL := fmt.Sprintf("%s/v1/providers/%s/%s/%s/download/%s/%s", uc.baseURL, namespace, providerType, version, os, arch)
+	uc.logger.DebugContext(ctx, "fetching download URL from registry",
+		slog.String("url", url),
+		slog.String("os", os),
+		slog.String("arch", arch))
 
-		body, status, err := uc.fetch(ctx, downloadURL)
-		if err != nil {
-			// Log but don't fail - some platforms might not be available
-			continue
-		}
-
-		// Skip if this platform doesn't exist (404)
-		if status == http.StatusNotFound {
-			continue
-		}
-
-		if status != http.StatusOK {
-			continue
-		}
-
-		var downloadInfo struct {
-			DownloadURL string `json:"download_url"`
-			Shasum      string `json:"shasum"`
-		}
-
-		if err := json.Unmarshal(body, &downloadInfo); err != nil {
-			continue
-		}
-
-		platformKey := fmt.Sprintf("%s_%s", os, arch)
-		archives[platformKey] = Archive{
-			URL: downloadInfo.DownloadURL,
-			Hashes: []string{
-				fmt.Sprintf("zh:%s", downloadInfo.Shasum),
-			},
-		}
+	body, status, err := uc.fetch(ctx, url)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(archives) == 0 {
-		return nil, fmt.Errorf("no platforms found for provider version %s/%s/%s", namespace, providerType, version)
+	if status == http.StatusNotFound {
+		return nil, ErrNotFound
 	}
 
-	return &VersionResponse{
-		Archives: archives,
-	}, nil
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", status)
+	}
+
+	var info DownloadInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse download info: %w", err)
+	}
+
+	uc.logger.DebugContext(ctx, "received download URL from registry",
+		slog.String("download_url", info.DownloadURL))
+
+	return &info, nil
 }
 
 // buildURL builds a complete URL from the base URL and path

@@ -21,6 +21,13 @@ type Storage interface {
 	// PutVersion stores the version.json for a specific provider version
 	PutVersion(ctx context.Context, hostname, namespace, providerType, version string, data []byte) error
 
+	// GetVersionsResponse retrieves the cached full versions API response
+	// Returns io.EOF if not found
+	GetVersionsResponse(ctx context.Context, hostname, namespace, providerType string) ([]byte, error)
+
+	// PutVersionsResponse stores the full versions API response
+	PutVersionsResponse(ctx context.Context, hostname, namespace, providerType string, data []byte) error
+
 	// GetArchive retrieves a cached provider archive
 	// Returns io.EOF if not found
 	// Caller is responsible for closing the returned ReadCloser
@@ -31,17 +38,4 @@ type Storage interface {
 
 	// ExistsArchive checks if an archive exists
 	ExistsArchive(ctx context.Context, path string) (bool, error)
-
-	// GetH1Hash retrieves the h1: hash for an archive
-	// Returns empty string if not found
-	GetH1Hash(ctx context.Context, path string) (string, error)
-
-	// PutH1Hash stores the h1: hash for an archive
-	PutH1Hash(ctx context.Context, path string, h1Hash string) error
-
-	// GetUpstreamURL retrieves the upstream URL for an archive
-	GetUpstreamURL(ctx context.Context, path string) (string, error)
-
-	// PutUpstreamURL stores the upstream URL for an archive
-	PutUpstreamURL(ctx context.Context, path string, upstreamURL string) error
 }

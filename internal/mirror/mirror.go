@@ -1,19 +1,15 @@
 package mirror
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/elisiariocouto/speculum/internal/storage"
-	"golang.org/x/mod/sumdb/dirhash"
 )
 
 // Mirror handles caching and proxying of Terraform providers
@@ -41,19 +37,27 @@ func (m *Mirror) GetIndex(ctx context.Context, hostname, namespace, providerType
 	}
 
 	// Cache miss, fetch from upstream
-	response, err := m.upstream.FetchIndex(ctx, hostname, namespace, providerType)
+	indexResponse, versionsResponse, err := m.upstream.FetchIndex(ctx, hostname, namespace, providerType)
 	if err != nil {
 		return nil, err
 	}
 
-	// Marshal response to JSON
-	data, err := json.Marshal(response)
+	// Marshal index response to JSON
+	data, err := json.Marshal(indexResponse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal index response: %w", err)
 	}
 
-	// Store in cache (non-blocking, errors are logged elsewhere)
+	// Store index in cache (non-blocking, errors are logged elsewhere)
 	_ = m.storage.PutIndex(ctx, hostname, namespace, providerType, data)
+
+	// Also cache the full versions response if available
+	if versionsResponse != nil {
+		versionsData, err := json.Marshal(versionsResponse)
+		if err == nil {
+			_ = m.storage.PutVersionsResponse(ctx, hostname, namespace, providerType, versionsData)
+		}
+	}
 
 	return data, nil
 }
@@ -64,13 +68,17 @@ func (m *Mirror) GetVersion(ctx context.Context, hostname, namespace, providerTy
 	// Try to get from cache
 	cachedData, err := m.storage.GetVersion(ctx, hostname, namespace, providerType, version)
 	if err == nil {
-		// Even if cached, we might need to rewrite URLs and include h1: hashes
-		return m.rewriteArchiveURLsWithH1(ctx, hostname, namespace, providerType, cachedData)
+		// Return cached data (URLs are already correct from when we built it)
+		return cachedData, nil
 	}
 
-	// Cache miss, fetch from upstream
+	// Cache miss, try to fetch from upstream
 	response, err := m.upstream.FetchVersion(ctx, hostname, namespace, providerType, version)
 	if err != nil {
+		// If upstream returns ErrNotFound, build from cached versions response
+		if err == ErrNotFound {
+			return m.buildVersionFromCache(ctx, hostname, namespace, providerType, version)
+		}
 		return nil, err
 	}
 
@@ -83,45 +91,97 @@ func (m *Mirror) GetVersion(ctx context.Context, hostname, namespace, providerTy
 	// Store in cache (non-blocking, errors are logged elsewhere)
 	_ = m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data)
 
-	// Rewrite archive URLs and include h1: hashes
-	return m.rewriteArchiveURLsWithH1(ctx, hostname, namespace, providerType, data)
+	// Rewrite archive URLs
+	return m.rewriteArchiveURLs(ctx, hostname, namespace, providerType, data)
 }
 
-// GetArchive returns a provider archive, using cache or fetching from upstream
-func (m *Mirror) GetArchive(ctx context.Context, archivePath string) (io.ReadCloser, error) {
+// buildVersionFromCache builds a version.json response from the cached versions response
+// This avoids making multiple API calls to the upstream registry
+func (m *Mirror) buildVersionFromCache(ctx context.Context, hostname, namespace, providerType, version string) ([]byte, error) {
+	// Get cached versions response
+	versionsData, err := m.storage.GetVersionsResponse(ctx, hostname, namespace, providerType)
+	if err != nil {
+		return nil, fmt.Errorf("no cached versions response available: %w", err)
+	}
+
+	// Parse versions response
+	var versionsResp RegistryVersionsResponse
+	if err := json.Unmarshal(versionsData, &versionsResp); err != nil {
+		return nil, fmt.Errorf("failed to parse versions response: %w", err)
+	}
+
+	// Find requested version
+	var platforms []RegistryPlatform
+	for _, v := range versionsResp.Versions {
+		if v.Version == version {
+			platforms = v.Platforms
+			break
+		}
+	}
+
+	if len(platforms) == 0 {
+		return nil, ErrNotFound
+	}
+
+	// Build version response without hashes (they're optional!)
+	response := &VersionResponse{
+		Archives: make(map[string]Archive),
+	}
+
+	for _, platform := range platforms {
+		platformKey := fmt.Sprintf("%s_%s", platform.OS, platform.Arch)
+		filename := fmt.Sprintf("terraform-provider-%s_%s_%s_%s.zip",
+			providerType, version, platform.OS, platform.Arch)
+
+		// Build URL pointing to mirror's download endpoint
+		archiveURL := fmt.Sprintf("%s/download/%s/%s/%s/%s/%s/%s/%s",
+			strings.TrimSuffix(m.baseURL, "/"),
+			hostname, namespace, providerType, version, platform.OS, platform.Arch, filename)
+
+		response.Archives[platformKey] = Archive{
+			URL:    archiveURL,
+			Hashes: nil, // Omit hashes - they're optional!
+		}
+	}
+
+	// Marshal and cache
+	data, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal version response: %w", err)
+	}
+
+	// Store in cache (non-blocking, errors are logged elsewhere)
+	_ = m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data)
+
+	return data, nil
+}
+
+// GetArchive returns a provider archive, using cache or fetching from upstream on-demand
+// Takes explicit parameters for on-demand fetching instead of relying on stored URLs
+func (m *Mirror) GetArchive(ctx context.Context, hostname, namespace, providerType, version, os, arch, archivePath string) (io.ReadCloser, error) {
 	// Try to get from cache
 	reader, err := m.storage.GetArchive(ctx, archivePath)
 	if err == nil {
 		return reader, nil
 	}
 
-	// Cache miss, get the upstream URL
-	upstreamURL, err := m.storage.GetUpstreamURL(ctx, archivePath)
-	if err != nil || upstreamURL == "" {
-		return nil, fmt.Errorf("archive not found and upstream URL not available")
+	// Cache miss - fetch download URL from registry API
+	downloadInfo, err := m.upstream.FetchDownloadURL(ctx, hostname, namespace, providerType, version, os, arch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get download URL: %w", err)
 	}
 
-	// Fetch from upstream
-	archiveReader, err := m.upstream.FetchArchive(ctx, upstreamURL)
+	// Fetch archive from upstream
+	archiveReader, err := m.upstream.FetchArchive(ctx, downloadInfo.DownloadURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch archive: %w", err)
 	}
 	defer archiveReader.Close()
 
-	// Read archive data into memory so we can compute h1: hash before caching
+	// Read archive data into memory for caching
 	archiveData, err := io.ReadAll(archiveReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read archive: %w", err)
-	}
-
-	// Compute h1: hash from archive contents
-	h1Hash, err := computeH1Hash(archiveData)
-	if err != nil {
-		// Log error but don't fail - h1: hash is best-effort
-		// The archive will still be cached and served, but without h1: hash
-	} else {
-		// Store the h1: hash for future use
-		_ = m.storage.PutH1Hash(ctx, archivePath, h1Hash)
 	}
 
 	// Store in cache
@@ -133,48 +193,38 @@ func (m *Mirror) GetArchive(ctx context.Context, archivePath string) (io.ReadClo
 	return m.storage.GetArchive(ctx, archivePath)
 }
 
-// rewriteArchiveURLsWithH1 rewrites archive URLs and includes h1: hashes if available
-// URLs are rewritten to match terraform providers mirror structure: hostname/namespace/type/filename.zip
-func (m *Mirror) rewriteArchiveURLsWithH1(ctx context.Context, hostname, namespace, providerType string, data []byte) ([]byte, error) {
+// rewriteArchiveURLs rewrites archive URLs to point to this mirror
+// For mirror protocol registries only (not used for service discovery-based registries)
+func (m *Mirror) rewriteArchiveURLs(ctx context.Context, hostname, namespace, providerType string, data []byte) ([]byte, error) {
 	var response VersionResponse
 	if err := json.Unmarshal(data, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse version response: %w", err)
 	}
 
-	// Rewrite URLs and add h1 hashes if available
+	// Rewrite URLs to point to mirror's download endpoint
 	for platform, archive := range response.Archives {
 		if archive.URL != "" {
-			// Store the original upstream URL
-			upstreamURL := archive.URL
-
 			// Extract just the filename from the original URL
 			filename := m.extractFilename(archive.URL)
 
-			// Construct the local archive path following terraform providers mirror structure
-			archivePath := fmt.Sprintf("%s/%s/%s/%s", hostname, namespace, providerType, filename)
+			// Build URL pointing to mirror's download endpoint
+			// We need to parse OS/arch from platform key (e.g., "linux_amd64" -> linux, amd64)
+			parts := strings.Split(platform, "_")
+			if len(parts) == 2 {
+				os, arch := parts[0], parts[1]
+				// Extract version from filename (this is a fallback for mirror protocol)
+				// The filename typically follows: terraform-provider-{type}_{version}_{os}_{arch}.zip
+				version := extractVersionFromFilename(filename, providerType)
 
-			// Store the mapping from local path to upstream URL
-			_ = m.storage.PutUpstreamURL(ctx, archivePath, upstreamURL)
+				// Build URL pointing to download endpoint
+				archiveURL := fmt.Sprintf("%s/download/%s/%s/%s/%s/%s/%s/%s",
+					strings.TrimSuffix(m.baseURL, "/"),
+					hostname, namespace, providerType, version, os, arch, filename)
 
-			// Rewrite URL to point to this mirror
-			archive.URL = fmt.Sprintf("%s/%s", strings.TrimSuffix(m.baseURL, "/"), archivePath)
-
-			// Check if we have a cached h1 hash for this archive
-			h1Hash, err := m.storage.GetH1Hash(ctx, archivePath)
-			if err == nil && h1Hash != "" {
-				// Add h1 hash to the hashes array if not already present
-				hasH1 := false
-				for _, hash := range archive.Hashes {
-					if strings.HasPrefix(hash, "h1:") {
-						hasH1 = true
-						break
-					}
-				}
-				if !hasH1 {
-					archive.Hashes = append(archive.Hashes, h1Hash)
-				}
+				archive.URL = archiveURL
 			}
 
+			// Keep upstream hashes if present (but don't compute our own)
 			response.Archives[platform] = archive
 		}
 	}
@@ -186,6 +236,22 @@ func (m *Mirror) rewriteArchiveURLsWithH1(ctx context.Context, hostname, namespa
 	}
 
 	return rewritten, nil
+}
+
+// extractVersionFromFilename extracts version from a provider archive filename
+// Example: terraform-provider-aws_5.0.0_linux_amd64.zip -> 5.0.0
+func extractVersionFromFilename(filename, providerType string) string {
+	// Remove terraform-provider- prefix and .zip suffix
+	prefix := fmt.Sprintf("terraform-provider-%s_", providerType)
+	name := strings.TrimPrefix(filename, prefix)
+	name = strings.TrimSuffix(name, ".zip")
+
+	// Split by underscore and take all but last 2 (os_arch)
+	parts := strings.Split(name, "_")
+	if len(parts) <= 2 {
+		return ""
+	}
+	return strings.Join(parts[:len(parts)-2], "_")
 }
 
 // extractFilename extracts just the filename from an archive URL
@@ -209,74 +275,4 @@ func (m *Mirror) extractFilename(archiveURL string) string {
 	}
 
 	return "archive.zip"
-}
-
-// computeH1Hash computes the h1: hash for a provider archive using the Go dirhash algorithm
-// Terraform extracts the zip first and then uses HashDir, not HashZip, to avoid the bug
-// where HashZip includes directory entries while HashDir doesn't.
-// See: https://github.com/golang/go/issues/53448
-func computeH1Hash(archiveData []byte) (string, error) {
-	// Create a temporary directory to extract the archive
-	tempDir, err := os.MkdirTemp("", "speculum-hash-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Extract the zip archive to the temporary directory
-	zipReader, err := zip.NewReader(bytes.NewReader(archiveData), int64(len(archiveData)))
-	if err != nil {
-		return "", fmt.Errorf("failed to read zip archive: %w", err)
-	}
-
-	for _, file := range zipReader.File {
-		// Construct the full path
-		path := filepath.Join(tempDir, file.Name)
-
-		// Check for zip slip vulnerability
-		if !strings.HasPrefix(path, filepath.Clean(tempDir)+string(os.PathSeparator)) {
-			return "", fmt.Errorf("invalid file path in archive: %s", file.Name)
-		}
-
-		if file.FileInfo().IsDir() {
-			// Create directory
-			if err := os.MkdirAll(path, file.Mode()); err != nil {
-				return "", fmt.Errorf("failed to create directory: %w", err)
-			}
-			continue
-		}
-
-		// Create parent directory if needed
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return "", fmt.Errorf("failed to create parent directory: %w", err)
-		}
-
-		// Extract file
-		outFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
-		if err != nil {
-			return "", fmt.Errorf("failed to create file: %w", err)
-		}
-
-		rc, err := file.Open()
-		if err != nil {
-			outFile.Close()
-			return "", fmt.Errorf("failed to open file in archive: %w", err)
-		}
-
-		_, err = io.Copy(outFile, rc)
-		rc.Close()
-		outFile.Close()
-
-		if err != nil {
-			return "", fmt.Errorf("failed to extract file: %w", err)
-		}
-	}
-
-	// Compute the h1 hash using dirhash.HashDir on the extracted directory
-	hash, err := dirhash.HashDir(tempDir, "", dirhash.Hash1)
-	if err != nil {
-		return "", fmt.Errorf("failed to compute h1 hash: %w", err)
-	}
-
-	return hash, nil
 }

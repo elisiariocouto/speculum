@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -50,11 +49,9 @@ func (h *Handlers) MetadataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if this is an archive request (e.g., "terraform-provider-aws_6.26.0_darwin_arm64.zip")
-	if strings.HasSuffix(tail, ".zip") {
-		h.ArchiveHandlerForProvider(w, r, tail)
-		return
-	}
+	// Note: Archive downloads are now handled by the dedicated /download endpoint
+	// Archive URLs in version.json point to /download/{hostname}/{namespace}/{type}/{version}/{os}/{arch}/{filename}
+	// This makes the old .zip handling here obsolete
 
 	// Not a valid request
 	http.Error(w, "Not Found", http.StatusNotFound)
@@ -167,41 +164,47 @@ func (h *Handlers) VersionHandler(w http.ResponseWriter, r *http.Request) {
 	h.VersionHandlerWithParams(w, r, version)
 }
 
-// ArchiveHandlerForProvider handles archive requests from the provider path
-// Route: /:hostname/:namespace/:type/filename.zip
-func (h *Handlers) ArchiveHandlerForProvider(w http.ResponseWriter, r *http.Request, filename string) {
+// DownloadHandler handles archive downloads with explicit parameters
+// Route: /download/{hostname}/{namespace}/{type}/{version}/{os}/{arch}/{filename}
+func (h *Handlers) DownloadHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract all parameters from URL
 	hostname := chi.URLParam(r, "hostname")
 	namespace := chi.URLParam(r, "namespace")
 	providerType := chi.URLParam(r, "type")
+	version := chi.URLParam(r, "version")
+	os := chi.URLParam(r, "os")
+	arch := chi.URLParam(r, "arch")
+	filename := chi.URLParam(r, "filename")
 
-	// Construct the full archive path
+	// Construct cache path
 	archivePath := fmt.Sprintf("%s/%s/%s/%s", hostname, namespace, providerType, filename)
 
-	h.logger.InfoContext(r.Context(), "archive request",
-		slog.String("path", archivePath),
+	h.logger.InfoContext(r.Context(), "download request",
 		slog.String("hostname", hostname),
 		slog.String("namespace", namespace),
 		slog.String("type", providerType),
-		slog.String("filename", filename),
-	)
+		slog.String("version", version),
+		slog.String("os", os),
+		slog.String("arch", arch),
+		slog.String("filename", filename))
 
 	start := time.Now()
-	reader, err := h.mirror.GetArchive(r.Context(), archivePath)
+	reader, err := h.mirror.GetArchive(r.Context(), hostname, namespace, providerType, version, os, arch, archivePath)
 	duration := time.Since(start).Seconds()
 
 	if err != nil {
-		if err == io.EOF {
+		if err == io.EOF || err == mirror.ErrNotFound {
 			h.metrics.RecordCacheMiss("archive")
-			h.logger.InfoContext(r.Context(), "archive not found", slog.String("path", archivePath))
+			h.logger.InfoContext(r.Context(), "archive not found",
+				slog.String("path", archivePath))
 			http.NotFound(w, r)
 			return
 		}
 
-		h.metrics.RecordError("archive_handler", "fetch_failed")
+		h.metrics.RecordError("download_handler", "fetch_failed")
 		h.logger.ErrorContext(r.Context(), "failed to get archive",
 			slog.String("path", archivePath),
-			slog.String("error", err.Error()),
-		)
+			slog.String("error", err.Error()))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -209,15 +212,6 @@ func (h *Handlers) ArchiveHandlerForProvider(w http.ResponseWriter, r *http.Requ
 
 	h.metrics.RecordCacheHit("archive")
 	h.metrics.RecordUpstreamRequest(http.StatusOK, duration, "archive")
-
-	// Get file size for Content-Length header
-	// This is crucial for proper handling through proxies and hash validation
-	if f, ok := reader.(*os.File); ok {
-		fi, err := f.Stat()
-		if err == nil {
-			w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
-		}
-	}
 
 	// Set response headers for archive download
 	w.Header().Set("Content-Type", "application/zip")
@@ -240,15 +234,4 @@ func (h *Handlers) HealthHandler(w http.ResponseWriter, r *http.Request) {
 // MetricsHandler returns the Prometheus metrics handler
 func (h *Handlers) MetricsHandler() http.Handler {
 	return promhttp.Handler()
-}
-
-// Helper functions
-
-// getFilename extracts the filename from an archive path
-func getFilename(path string) string {
-	parts := strings.Split(path, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
-	}
-	return "archive.zip"
 }

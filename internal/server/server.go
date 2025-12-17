@@ -51,6 +51,9 @@ func New(
 		// GET /terraform/providers/:hostname/:namespace/:type/* (catches index.json, version.json, and archives)
 		// Use wildcard to handle dots in version numbers (e.g., 6.26.0.json) and zip files
 		r.Get("/{hostname}/{namespace}/{type}/*", handlers.MetadataHandler)
+
+		// Provider archive download endpoint with explicit parameters
+		r.Get("/download/{hostname}/{namespace}/{type}/{version}/{os}/{arch}/{filename}", handlers.DownloadHandler)
 	})
 
 	// 404 handler
