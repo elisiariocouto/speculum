@@ -24,8 +24,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.CacheDir != "/var/cache/speculum" {
 		t.Fatalf("expected default cache dir /var/cache/speculum, got %s", cfg.CacheDir)
 	}
-	if cfg.BaseURL != "http://localhost:8080" {
-		t.Fatalf("expected default base URL http://localhost:8080, got %s", cfg.BaseURL)
+	if cfg.BaseURL != "https://speculum.example.com" {
+		t.Fatalf("expected default base URL https://speculum.example.com, got %s", cfg.BaseURL)
 	}
 	if cfg.LogLevel != "info" || cfg.LogFormat != "json" {
 		t.Fatalf("expected default log level info and format json, got %s/%s", cfg.LogLevel, cfg.LogFormat)

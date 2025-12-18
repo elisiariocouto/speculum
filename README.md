@@ -17,28 +17,24 @@ Speculum implements the [Terraform Provider Network Mirror Protocol](https://dev
 
 ## Quick Start
 
+> **⚠️ Important**: Terraform requires network mirrors to be served over HTTPS with a valid certificate. Running Speculum on plain HTTP (localhost development excluded) will not work with Terraform. Use a reverse proxy like [Caddy](https://caddyserver.com/), [Traefik](https://traefik.io/), or [nginx](https://nginx.org/) to handle TLS termination.
+
 ### Installation
 
-```bash
-git clone https://github.com/elisiariocouto/speculum.git
-cd speculum
-make build
-```
+Download the latest release from the [releases page](https://github.com/elisiariocouto/speculum/releases).
 
-### Running Locally
+Alternatively, run Speculum using Docker:
 
 ```bash
-# Set up cache directory
-mkdir -p /tmp/speculum-cache
+# Docker Hub
+docker run -p 8080:8080 \
+  -e SPECULUM_BASE_URL=https://speculum.example.com \
+  elisiariocouto/speculum:latest
 
-# Configure environment variables
-export SPECULUM_PORT=8080
-export SPECULUM_HOST=0.0.0.0
-export SPECULUM_CACHE_DIR=/tmp/speculum-cache
-export SPECULUM_BASE_URL=http://localhost:8080
-
-# Run the server
-make run
+# GitHub Container Registry
+docker run -p 8080:8080 \
+  -e SPECULUM_BASE_URL=https://speculum.example.com \
+  ghcr.io/elisiariocouto/speculum:latest
 ```
 
 ### Using with Terraform
@@ -48,7 +44,7 @@ Configure Terraform to use the mirror by adding to `~/.terraformrc`:
 ```hcl
 provider_installation {
   network_mirror {
-    url = "http://localhost:8080/terraform/providers/"
+    url = "https://speculum.example.com/terraform/providers/"
   }
 }
 ```
@@ -75,7 +71,7 @@ All configuration is via environment variables:
 - `SPECULUM_UPSTREAM_MAX_RETRIES` (default: `3`) - Max retry attempts
 
 ### Mirror Configuration
-- `SPECULUM_BASE_URL` (default: `http://localhost:8080`) - Public base URL of mirror
+- `SPECULUM_BASE_URL` (default: `https://speculum.example.com`) - Public base URL of mirror
 
 ### Observability Configuration
 - `SPECULUM_LOG_LEVEL` (default: `info`) - Log level: debug, info, warn, error
@@ -112,31 +108,9 @@ GET /health
 
 Health check endpoint.
 
-## Development
+## Contributing
 
-### Running Tests
-
-```bash
-make test
-```
-
-### Running Tests with Coverage
-
-```bash
-make test-coverage
-```
-
-### Formatting Code
-
-```bash
-make fmt
-```
-
-### Linting
-
-```bash
-make lint
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running locally, and release procedures.
 
 ## Architecture
 
@@ -145,7 +119,7 @@ The mirror consists of several layers:
 - **HTTP Server** - Handles requests and routing
 - **Mirror Service** - Core cache-or-fetch business logic
 - **Storage Layer** - Abstract interface with filesystem implementation
-- **Upstream Client** - Fetches from registry.terraform.io
+- **Upstream Client** - Fetches from provider registries, uses Terraform's [Remote Service Discovery Protocol](https://developer.hashicorp.com/terraform/internals/remote-service-discovery)
 - **Observability** - Prometheus metrics and structured logging
 
 ## Future Enhancements

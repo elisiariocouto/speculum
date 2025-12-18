@@ -51,7 +51,7 @@ func Load() (*Config, error) {
 		UpstreamTimeout:   60 * time.Second,
 		MaxRetries:        3,
 		DiscoveryCacheTTL: 1 * time.Hour,
-		BaseURL:           "http://localhost:8080",
+		BaseURL:           "https://speculum.example.com",
 		LogLevel:          "info",
 		LogFormat:         "json",
 		MetricsEnabled:    true,
