@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -48,14 +49,18 @@ func (m *Mirror) GetIndex(ctx context.Context, hostname, namespace, providerType
 		return nil, fmt.Errorf("failed to marshal index response: %w", err)
 	}
 
-	// Store index in cache (non-blocking, errors are logged elsewhere)
-	_ = m.storage.PutIndex(ctx, hostname, namespace, providerType, data)
+	// Store index in cache (non-blocking, errors are logged)
+	if err := m.storage.PutIndex(ctx, hostname, namespace, providerType, data); err != nil {
+		slog.Warn("failed to cache index", "hostname", hostname, "namespace", namespace, "type", providerType, "err", err)
+	}
 
 	// Also cache the full versions response if available
 	if versionsResponse != nil {
 		versionsData, err := json.Marshal(versionsResponse)
 		if err == nil {
-			_ = m.storage.PutVersionsResponse(ctx, hostname, namespace, providerType, versionsData)
+			if err := m.storage.PutVersionsResponse(ctx, hostname, namespace, providerType, versionsData); err != nil {
+				slog.Warn("failed to cache versions response", "hostname", hostname, "namespace", namespace, "type", providerType, "err", err)
+			}
 		}
 	}
 
@@ -88,8 +93,10 @@ func (m *Mirror) GetVersion(ctx context.Context, hostname, namespace, providerTy
 		return nil, fmt.Errorf("failed to marshal version response: %w", err)
 	}
 
-	// Store in cache (non-blocking, errors are logged elsewhere)
-	_ = m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data)
+	// Store in cache (non-blocking, errors are logged)
+	if err := m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data); err != nil {
+		slog.Warn("failed to cache version", "hostname", hostname, "namespace", namespace, "type", providerType, "version", version, "err", err)
+	}
 
 	// Rewrite archive URLs
 	return m.rewriteArchiveURLs(ctx, hostname, namespace, providerType, version, data)
@@ -129,9 +136,8 @@ func (m *Mirror) buildVersionFromCache(ctx context.Context, hostname, namespace,
 	}
 
 	for _, platform := range platforms {
-		platformKey := fmt.Sprintf("%s_%s", platform.OS, platform.Arch)
-		filename := fmt.Sprintf("terraform-provider-%s_%s_%s_%s.zip",
-			providerType, version, platform.OS, platform.Arch)
+		platformKey := buildPlatformKey(platform.OS, platform.Arch)
+		filename := buildProviderFilename(providerType, version, platform.OS, platform.Arch)
 
 		// Build URL pointing to mirror's download endpoint
 		archiveURL := m.buildDownloadURL(hostname, namespace, providerType, version, platform.OS, platform.Arch, filename)
@@ -148,8 +154,10 @@ func (m *Mirror) buildVersionFromCache(ctx context.Context, hostname, namespace,
 		return nil, fmt.Errorf("failed to marshal version response: %w", err)
 	}
 
-	// Store in cache (non-blocking, errors are logged elsewhere)
-	_ = m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data)
+	// Store in cache (non-blocking, errors are logged)
+	if err := m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data); err != nil {
+		slog.Warn("failed to cache version from cache build", "hostname", hostname, "namespace", namespace, "type", providerType, "version", version, "err", err)
+	}
 
 	return data, nil
 }
@@ -205,19 +213,18 @@ func (m *Mirror) rewriteArchiveURLs(ctx context.Context, hostname, namespace, pr
 			// Extract just the filename from the original URL
 			filename := m.extractFilename(archive.URL)
 
-			// Build URL pointing to mirror's download endpoint
-			// We need to parse OS/arch from platform key (e.g., "linux_amd64" -> linux, amd64)
-			parts := strings.Split(platform, "_")
-			if len(parts) == 2 {
-				os, arch := parts[0], parts[1]
-
-				// Build URL pointing to download endpoint
-				archiveURL := m.buildDownloadURL(hostname, namespace, providerType, version, os, arch, filename)
-
-				archive.URL = archiveURL
+			// Parse OS/arch from platform key (e.g., "linux_amd64" -> linux, amd64)
+			os, arch, err := parsePlatformKey(platform)
+			if err != nil {
+				slog.Warn("invalid platform key format", "platform", platform, "err", err)
+				continue
 			}
 
+			// Build URL pointing to download endpoint
+			archiveURL := m.buildDownloadURL(hostname, namespace, providerType, version, os, arch, filename)
+
 			// Keep upstream hashes if present (but don't compute our own)
+			archive.URL = archiveURL
 			response.Archives[platform] = archive
 		}
 	}
@@ -259,4 +266,23 @@ func (m *Mirror) buildDownloadURL(hostname, namespace, providerType, version, os
 	return fmt.Sprintf("%s/download/%s/%s/%s/%s/%s/%s/%s",
 		strings.TrimSuffix(m.baseURL, "/"),
 		hostname, namespace, providerType, version, os, arch, filename)
+}
+
+// buildPlatformKey constructs a platform key from OS and architecture
+func buildPlatformKey(os, arch string) string {
+	return fmt.Sprintf("%s_%s", os, arch)
+}
+
+// buildProviderFilename constructs a provider archive filename
+func buildProviderFilename(providerType, version, os, arch string) string {
+	return fmt.Sprintf("terraform-provider-%s_%s_%s_%s.zip", providerType, version, os, arch)
+}
+
+// parsePlatformKey parses a platform key (e.g., "linux_amd64") into OS and architecture
+func parsePlatformKey(platform string) (os, arch string, err error) {
+	parts := strings.Split(platform, "_")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid platform key format: %s", platform)
+	}
+	return parts[0], parts[1], nil
 }
