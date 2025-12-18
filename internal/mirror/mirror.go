@@ -1,13 +1,14 @@
 package mirror
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/elisiariocouto/speculum/internal/storage"
@@ -81,7 +82,7 @@ func (m *Mirror) GetVersion(ctx context.Context, hostname, namespace, providerTy
 	response, err := m.upstream.FetchVersion(ctx, hostname, namespace, providerType, version)
 	if err != nil {
 		// If upstream returns ErrNotFound, build from cached versions response
-		if err == ErrNotFound {
+		if errors.Is(err, ErrNotFound) {
 			return m.buildVersionFromCache(ctx, hostname, namespace, providerType, version)
 		}
 		return nil, err
@@ -93,13 +94,18 @@ func (m *Mirror) GetVersion(ctx context.Context, hostname, namespace, providerTy
 		return nil, fmt.Errorf("failed to marshal version response: %w", err)
 	}
 
-	// Store in cache (non-blocking, errors are logged)
-	if err := m.storage.PutVersion(ctx, hostname, namespace, providerType, version, data); err != nil {
-		slog.Warn("failed to cache version", "hostname", hostname, "namespace", namespace, "type", providerType, "version", version, "err", err)
+	// Rewrite archive URLs to point to this mirror
+	rewritten, err := m.rewriteArchiveURLs(ctx, hostname, namespace, providerType, version, data)
+	if err != nil {
+		return nil, err
 	}
 
-	// Rewrite archive URLs
-	return m.rewriteArchiveURLs(ctx, hostname, namespace, providerType, version, data)
+	// Store rewritten response in cache (non-blocking, errors are logged)
+	if err := m.storage.PutVersion(ctx, hostname, namespace, providerType, version, rewritten); err != nil {
+		slog.Warn("failed to cache rewritten version", "hostname", hostname, "namespace", namespace, "type", providerType, "version", version, "err", err)
+	}
+
+	return rewritten, nil
 }
 
 // buildVersionFromCache builds a version.json response from the cached versions response
@@ -184,14 +190,8 @@ func (m *Mirror) GetArchive(ctx context.Context, hostname, namespace, providerTy
 	}
 	defer archiveReader.Close()
 
-	// Read archive data into memory for caching
-	archiveData, err := io.ReadAll(archiveReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read archive: %w", err)
-	}
-
-	// Store in cache
-	if err := m.storage.PutArchive(ctx, archivePath, bytes.NewReader(archiveData)); err != nil {
+	// Stream archive directly into cache to avoid holding entire file in memory
+	if err := m.storage.PutArchive(ctx, archivePath, archiveReader); err != nil {
 		return nil, fmt.Errorf("failed to cache archive: %w", err)
 	}
 
@@ -253,12 +253,11 @@ func (m *Mirror) extractFilename(archiveURL string) string {
 	}
 
 	// Get the last component of the path
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
+	base := path.Base(u.Path)
+	if base == "." || base == "/" || base == "" {
+		return "archive.zip"
 	}
-
-	return "archive.zip"
+	return base
 }
 
 // buildDownloadURL constructs a download URL for a provider archive
