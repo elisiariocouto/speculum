@@ -61,6 +61,7 @@ func main() {
 	upstreamClient := mirror.NewUpstreamClient(
 		cfg.UpstreamTimeout,
 		cfg.MaxRetries,
+		cfg.DiscoveryCacheTTL,
 		log,
 	)
 

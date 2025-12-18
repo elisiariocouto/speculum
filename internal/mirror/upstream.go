@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -20,7 +21,7 @@ type UpstreamClient struct {
 }
 
 // NewUpstreamClient creates a new upstream client
-func NewUpstreamClient(timeout time.Duration, maxRetries int, logger *slog.Logger) *UpstreamClient {
+func NewUpstreamClient(timeout time.Duration, maxRetries int, discoveryCacheTTL time.Duration, logger *slog.Logger) *UpstreamClient {
 	// Create HTTP client with connection pooling and timeouts
 	httpClient := &http.Client{
 		Timeout: timeout,
@@ -32,8 +33,8 @@ func NewUpstreamClient(timeout time.Duration, maxRetries int, logger *slog.Logge
 		},
 	}
 
-	// Create discovery cache with 1 hour TTL
-	discoveryCache := NewDiscoveryCache(1*time.Hour, httpClient, logger)
+	// Create discovery cache with configurable TTL
+	discoveryCache := NewDiscoveryCache(discoveryCacheTTL, httpClient, logger)
 
 	return &UpstreamClient{
 		httpClient:     httpClient,
@@ -169,6 +170,20 @@ func (uc *UpstreamClient) FetchVersion(ctx context.Context, hostname, namespace,
 // FetchArchive fetches a provider archive from a URL
 // The archiveURL must be an absolute URL
 func (uc *UpstreamClient) FetchArchive(ctx context.Context, archiveURL string) (io.ReadCloser, error) {
+	// Validate URL
+	parsedURL, err := url.Parse(archiveURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid archive URL: %w", err)
+	}
+
+	if parsedURL.Scheme == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return nil, fmt.Errorf("archive URL must use http or https scheme, got: %s", parsedURL.Scheme)
+	}
+
+	if parsedURL.Host == "" {
+		return nil, fmt.Errorf("archive URL must have a host")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -187,6 +202,34 @@ func (uc *UpstreamClient) FetchArchive(ctx context.Context, archiveURL string) (
 	return resp.Body, nil
 }
 
+// handleResponse processes HTTP response and extracts body, with proper cleanup
+func (uc *UpstreamClient) handleResponse(resp *http.Response) ([]byte, error) {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	return body, nil
+}
+
+// shouldRetry determines if a request should be retried based on status code
+func (uc *UpstreamClient) shouldRetry(statusCode int, attempt int) bool {
+	if statusCode >= 500 && attempt < uc.maxRetries {
+		return true
+	}
+	return false
+}
+
+// exponentialBackoff waits for exponential backoff duration, respecting context cancellation
+func exponentialBackoff(ctx context.Context, attempt int) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(time.Duration(1<<uint(attempt)) * time.Second):
+		return nil
+	}
+}
+
 // fetch performs an HTTP GET request with retry logic
 func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, error) {
 	var lastErr error
@@ -202,49 +245,35 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 		if err != nil {
 			lastErr = err
 			if attempt < uc.maxRetries {
-				// Exponential backoff
-				select {
-				case <-ctx.Done():
-					return nil, 0, ctx.Err()
-				case <-time.After(time.Duration(1<<uint(attempt)) * time.Second):
-					continue
+				if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
+					return nil, 0, backoffErr
 				}
+				continue
 			}
 			continue
 		}
 
 		lastStatus = resp.StatusCode
-		defer resp.Body.Close()
 
 		// Don't retry on client errors (4xx)
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
-			}
-			return body, resp.StatusCode, nil
+			body, err := uc.handleResponse(resp)
+			return body, resp.StatusCode, err
 		}
 
-		// Retry on server errors (5xx) and service unavailable
-		if resp.StatusCode >= 500 {
-			if attempt < uc.maxRetries {
-				select {
-				case <-ctx.Done():
-					return nil, resp.StatusCode, ctx.Err()
-				case <-time.After(time.Duration(1<<uint(attempt)) * time.Second):
-					continue
-				}
+		// Retry on server errors (5xx)
+		if uc.shouldRetry(resp.StatusCode, attempt) {
+			resp.Body.Close()
+			if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
+				return nil, resp.StatusCode, backoffErr
 			}
 			lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
 			continue
 		}
 
-		// Success
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
-		}
-		return body, resp.StatusCode, nil
+		// Success or final attempt
+		body, err := uc.handleResponse(resp)
+		return body, resp.StatusCode, err
 	}
 
 	if lastErr != nil {

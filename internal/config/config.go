@@ -24,8 +24,9 @@ type Config struct {
 	CacheDir    string
 
 	// Upstream configuration
-	UpstreamTimeout time.Duration
-	MaxRetries      int
+	UpstreamTimeout   time.Duration
+	MaxRetries        int
+	DiscoveryCacheTTL time.Duration
 
 	// Mirror configuration
 	BaseURL string
@@ -40,19 +41,20 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		// Defaults
-		Port:            8080,
-		Host:            "0.0.0.0",
-		ReadTimeout:     30 * time.Second,
-		WriteTimeout:    30 * time.Second,
-		ShutdownTimeout: 30 * time.Second,
-		StorageType:     "filesystem",
-		CacheDir:        "/var/cache/speculum",
-		UpstreamTimeout: 60 * time.Second,
-		MaxRetries:      3,
-		BaseURL:         "http://localhost:8080",
-		LogLevel:        "info",
-		LogFormat:       "json",
-		MetricsEnabled:  true,
+		Port:              8080,
+		Host:              "0.0.0.0",
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		ShutdownTimeout:   30 * time.Second,
+		StorageType:       "filesystem",
+		CacheDir:          "/var/cache/speculum",
+		UpstreamTimeout:   60 * time.Second,
+		MaxRetries:        3,
+		DiscoveryCacheTTL: 1 * time.Hour,
+		BaseURL:           "http://localhost:8080",
+		LogLevel:          "info",
+		LogFormat:         "json",
+		MetricsEnabled:    true,
 	}
 
 	// Override with environment variables
@@ -89,6 +91,10 @@ func Load() (*Config, error) {
 	}
 
 	if err := setEnvInt("SPECULUM_UPSTREAM_MAX_RETRIES", &cfg.MaxRetries, "must be a valid integer"); err != nil {
+		return nil, err
+	}
+
+	if err := setEnvDuration("SPECULUM_DISCOVERY_CACHE_TTL", &cfg.DiscoveryCacheTTL, "must be a valid duration (e.g., 1h)"); err != nil {
 		return nil, err
 	}
 
