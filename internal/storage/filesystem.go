@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/exp/slices"
 )
 
 // FilesystemStorage implements Storage using the local filesystem
@@ -29,24 +31,42 @@ func NewFilesystemStorage(cacheDir string) (*FilesystemStorage, error) {
 
 // GetIndex retrieves the cached index.json for a provider
 func (fs *FilesystemStorage) GetIndex(ctx context.Context, hostname, namespace, providerType string) ([]byte, error) {
+	if err := validateProviderPath(hostname, namespace, providerType); err != nil {
+		return nil, err
+	}
 	path := fs.indexPath(hostname, namespace, providerType)
 	return fs.readFile(ctx, path)
 }
 
 // PutIndex stores the index.json for a provider
 func (fs *FilesystemStorage) PutIndex(ctx context.Context, hostname, namespace, providerType string, data []byte) error {
+	if err := validateProviderPath(hostname, namespace, providerType); err != nil {
+		return err
+	}
 	path := fs.indexPath(hostname, namespace, providerType)
 	return fs.writeFileAtomic(ctx, path, data)
 }
 
 // GetVersion retrieves the cached version.json for a specific provider version
 func (fs *FilesystemStorage) GetVersion(ctx context.Context, hostname, namespace, providerType, version string) ([]byte, error) {
+	if err := validateProviderPath(hostname, namespace, providerType); err != nil {
+		return nil, err
+	}
+	if version == "" {
+		return nil, errors.New("version cannot be empty")
+	}
 	path := fs.versionPath(hostname, namespace, providerType, version)
 	return fs.readFile(ctx, path)
 }
 
 // PutVersion stores the version.json for a specific provider version
 func (fs *FilesystemStorage) PutVersion(ctx context.Context, hostname, namespace, providerType, version string, data []byte) error {
+	if err := validateProviderPath(hostname, namespace, providerType); err != nil {
+		return err
+	}
+	if version == "" {
+		return errors.New("version cannot be empty")
+	}
 	path := fs.versionPath(hostname, namespace, providerType, version)
 	return fs.writeFileAtomic(ctx, path, data)
 }
@@ -66,36 +86,14 @@ func (fs *FilesystemStorage) GetArchive(ctx context.Context, path string) (io.Re
 
 // PutArchive stores a provider archive
 func (fs *FilesystemStorage) PutArchive(ctx context.Context, path string, data io.Reader) error {
+	if path == "" {
+		return errors.New("archive path cannot be empty")
+	}
 	fullPath := fs.archivePath(path)
-
-	// Create directory if it doesn't exist
-	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create archive directory: %w", err)
-	}
-
-	// Write to temporary file first, then rename (atomic)
-	tmpFile, err := os.CreateTemp(dir, ".tmp-")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := io.Copy(tmpFile, data); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("failed to write archive: %w", err)
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file: %w", err)
-	}
-
-	// Atomically move temp file to final location
-	if err := os.Rename(tmpFile.Name(), fullPath); err != nil {
-		return fmt.Errorf("failed to finalize archive: %w", err)
-	}
-
-	return nil
+	return fs.atomicWrite(fullPath, func(f *os.File) error {
+		_, err := io.Copy(f, data)
+		return err
+	})
 }
 
 // ExistsArchive checks if an archive exists
@@ -170,15 +168,20 @@ func (fs *FilesystemStorage) archivePath(path string) string {
 	if strings.Contains(sanitized, "..") {
 		sanitized = strings.ReplaceAll(sanitized, "..", "")
 	}
-	if strings.HasPrefix(sanitized, "/") {
-		sanitized = sanitized[1:]
-	}
+	sanitized = strings.TrimPrefix(sanitized, "/")
 
 	return filepath.Join(fs.cacheDir, sanitized)
 }
 
-// readFile reads a file from disk
+// readFile reads a file from disk, respecting context cancellation
 func (fs *FilesystemStorage) readFile(ctx context.Context, path string) ([]byte, error) {
+	// Check for context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Ensure path is within cache directory
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -205,8 +208,9 @@ func (fs *FilesystemStorage) readFile(ctx context.Context, path string) ([]byte,
 	return data, nil
 }
 
-// writeFileAtomic writes a file atomically using a temporary file
-func (fs *FilesystemStorage) writeFileAtomic(ctx context.Context, path string, data []byte) error {
+// atomicWrite is a helper that writes to a file atomically using a temporary file and rename
+// The writeFunc should write data to the provided file and return an error if writing fails
+func (fs *FilesystemStorage) atomicWrite(path string, writeFunc func(*os.File) error) error {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -218,21 +222,46 @@ func (fs *FilesystemStorage) writeFileAtomic(ctx context.Context, path string, d
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	tmpPath := tmpFile.Name()
 
-	if _, err := tmpFile.Write(data); err != nil {
+	if err := writeFunc(tmpFile); err != nil {
 		tmpFile.Close()
+		os.Remove(tmpPath) // Clean up temp file on write error
 		return fmt.Errorf("failed to write data: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath) // Clean up temp file on close error
 		return fmt.Errorf("failed to close temporary file: %w", err)
 	}
 
 	// Atomically move temp file to final location
-	if err := os.Rename(tmpFile.Name(), path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) // Clean up temp file on rename error
 		return fmt.Errorf("failed to finalize write: %w", err)
 	}
 
+	return nil
+}
+
+// writeFileAtomic writes a file atomically using a temporary file
+func (fs *FilesystemStorage) writeFileAtomic(ctx context.Context, path string, data []byte) error {
+	return fs.atomicWrite(path, func(f *os.File) error {
+		_, err := f.Write(data)
+		return err
+	})
+}
+
+// validateProviderPath checks that provider path components are valid
+func validateProviderPath(hostname, namespace, providerType string) error {
+	if hostname == "" || namespace == "" || providerType == "" {
+		return errors.New("hostname, namespace, and providerType cannot be empty")
+	}
+	// Reject paths with suspicious characters that could cause issues
+	for _, component := range []string{hostname, namespace, providerType} {
+		if slices.Contains([]rune(component), '/') || slices.Contains([]rune(component), '\\') {
+			return fmt.Errorf("invalid character in path component: %s", component)
+		}
+	}
 	return nil
 }

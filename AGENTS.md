@@ -66,13 +66,12 @@ The application follows a clean layered architecture:
 
 4. **internal/storage** - Storage abstraction layer
    - Interface with two implementations: `FilesystemStorage` and `MemoryStorage`
-   - Methods: GetIndex, PutIndex, GetVersion, PutVersion, GetArchive, PutArchive, ExistsArchive, GetH1Hash, PutH1Hash, GetUpstreamURL, PutUpstreamURL
+   - Methods: GetIndex, PutIndex, GetVersion, PutVersion, GetVersionsResponse, PutVersionsResponse, GetArchive, PutArchive, ExistsArchive
    - Filesystem layout matches `terraform providers mirror` structure:
      - Index files: `hostname/namespace/type/index.json`
      - Version metadata: `hostname/namespace/type/VERSION.json`
-     - Archives: `hostname/namespace/type/filename.zip` (e.g., `registry.terraform.io/hashicorp/aws/terraform-provider-aws_6.26.0_darwin_arm64.zip`)
-     - H1 hash files: stored alongside archives with `.h1` extension
-     - Upstream URL mapping: stored alongside archives with `.upstream` extension for lazy fetching
+     - Versions API response cache: `.speculum-internal/hostname/namespace/type/versions.json`
+     - Archives: stored with full domain preservation (e.g., `registry.terraform.io/hashicorp/aws/terraform-provider-aws_6.26.0_darwin_arm64.zip`)
 
 5. **internal/mirror/upstream.go** - Upstream registry client
    - Handles fetching from registry.terraform.io or other registries
@@ -116,6 +115,13 @@ Implements Terraform Provider Network Mirror Protocol v1:
 - Storage type can be switched between "filesystem" and "memory" via `SPECULUM_STORAGE_TYPE`
 - Upstream registry is configurable for testing or alternate registries
 - Filesystem structure matches `terraform providers mirror` for compatibility with existing tooling
+
+## Code Quality Standards
+
+- **Always fix lint errors**: Never use `nolint` directives or ignore linting rules
+- If a lint rule flags code as problematic, the code should be refactored to resolve the issue properly
+- The linting setup includes `go fmt`, `staticcheck`, and `go vet` to maintain code quality
+- All code must pass `make lint` before being considered complete
 
 ## Testing Approach
 

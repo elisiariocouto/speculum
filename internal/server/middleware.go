@@ -119,14 +119,6 @@ func (rw *responseWriter) Flush() {
 	}
 }
 
-// CloseNotifier returns a channel that receives notification when the client closes the connection
-func (rw *responseWriter) CloseNotify() <-chan bool {
-	if cn, ok := rw.ResponseWriter.(http.CloseNotifier); ok {
-		return cn.CloseNotify()
-	}
-	return make(<-chan bool)
-}
-
 // ReadCloserWithSize wraps an io.ReadCloser and tracks bytes read
 type ReadCloserWithSize struct {
 	io.ReadCloser

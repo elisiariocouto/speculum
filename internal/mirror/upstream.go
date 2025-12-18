@@ -315,4 +315,3 @@ func (uc *UpstreamClient) FetchDownloadURL(ctx context.Context, hostname, namesp
 
 	return &info, nil
 }
-
