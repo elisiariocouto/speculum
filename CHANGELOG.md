@@ -1,4 +1,12 @@
 
+## 2025.12.3 (2025/12/19)
+
+### Bug Fixes
+
+-  Auto-fetch index when building version from cache ([e91696cc](https://github.com/elisiariocouto/specular/commit/e91696cc90a0b9e7ab555af9ce0f7851087b5e07))
+
+
+
 ## 2025.12.2 (2025/12/19)
 
 ### Features
