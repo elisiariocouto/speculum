@@ -11,7 +11,7 @@ requesting information from a registry implementing [Terraform Provider Protocol
 
 Client requests: `GET /registry.terraform.io/hashicorp/random/index.json`
 
-To serve this, Speculum:
+To serve this, Specular:
 - Performs service discovery: `GET https://registry.terraform.io/.well-known/terraform.json`
 - Gets the providers API endpoint (e.g., `https://registry.terraform.io/v1/providers/`)
 - Calls: `GET https://registry.terraform.io/v1/providers/hashicorp/random/versions`
@@ -34,7 +34,7 @@ This returns a list of versions with their supported platforms:
 }
 ```
 
-Speculum returns the following document, as per spec.
+Specular returns the following document, as per spec.
 ```json
 {
   "versions": {
@@ -50,7 +50,7 @@ Speculum returns the following document, as per spec.
 
 Client requests: `GET /registry.terraform.io/hashicorp/random/2.0.0.json`
 
-Speculum needs to return:
+Specular needs to return:
 ```json
 {
   "archives": {
@@ -135,7 +135,7 @@ Only then do we:
 
 According to the [Terraform Provider Network Mirror Protocol specification](https://developer.hashicorp.com/terraform/internals/provider-network-mirror-protocol), **the `hashes` field is optional**.
 
-By omitting hashes from the version metadata response, Speculum can:
+By omitting hashes from the version metadata response, Specular can:
 
 1. ✅ Serve index.json with just 1-2 API calls
 2. ✅ Serve version metadata instantly without any additional API calls (reuse platform list from step 1)
@@ -175,7 +175,7 @@ By omitting hashes from the version metadata response, Speculum can:
 
 ## Conclusion
 
-For a caching proxy mirror like Speculum, the lazy approach without hashes is the right tradeoff:
+For a caching proxy mirror like Specular, the lazy approach without hashes is the right tradeoff:
 
 - Hashes are optional per the protocol specification
 - The primary goal is to cache and accelerate provider downloads

@@ -11,7 +11,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/elisiariocouto/speculum/internal/storage"
+	"github.com/elisiariocouto/specular/internal/storage"
 )
 
 // Mirror handles caching and proxying of Terraform providers

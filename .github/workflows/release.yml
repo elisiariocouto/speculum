@@ -40,17 +40,17 @@ jobs:
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
           COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          BINARY_NAME=speculum-${{ matrix.goos }}-${{ matrix.goarch }}
+          BINARY_NAME=specular-${{ matrix.goos }}-${{ matrix.goarch }}
           if [ "${{ matrix.goos }}" = "windows" ]; then
             BINARY_NAME="${BINARY_NAME}.exe"
           fi
-          go build -ldflags "-s -w -X github.com/elisiariocouto/speculum/internal/version.Version=${VERSION} -X github.com/elisiariocouto/speculum/internal/version.Commit=${COMMIT} -X github.com/elisiariocouto/speculum/internal/version.BuildDate=${BUILD_DATE}" -o bin/${BINARY_NAME} ./cmd/speculum
+          go build -ldflags "-s -w -X github.com/elisiariocouto/specular/internal/version.Version=${VERSION} -X github.com/elisiariocouto/specular/internal/version.Commit=${COMMIT} -X github.com/elisiariocouto/specular/internal/version.BuildDate=${BUILD_DATE}" -o bin/${BINARY_NAME} ./cmd/specular
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: speculum-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: bin/speculum-*
+          name: specular-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/specular-*
 
   push-docker:
     name: Push Docker Image
@@ -88,8 +88,8 @@ jobs:
           flavor: |
             latest=false
           images: |
-            elisiariocouto/speculum
-            ghcr.io/elisiariocouto/speculum
+            elisiariocouto/specular
+            ghcr.io/elisiariocouto/specular
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}

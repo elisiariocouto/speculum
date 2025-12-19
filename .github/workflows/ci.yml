@@ -57,5 +57,5 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: speculum-binary
-          path: bin/speculum
+          name: specular-binary
+          path: bin/specular

@@ -1,8 +1,8 @@
-# 🪞 Speculum
+# 🪞 Specular
 
-Speculum is an open-source Terraform provider network mirror. This might evolve into a generic proxy mirror for other packages/artifacts.
+Specular is an open-source Terraform provider network mirror. This might evolve into a generic proxy mirror for other packages/artifacts.
 
-Speculum implements the [Terraform Provider Network Mirror Protocol](https://developer.hashicorp.com/terraform/internals/provider-network-mirror-protocol) to intercept provider requests, cache them locally, and serve subsequent requests from cache. This reduces dependency on upstream registries and improves deployment speeds.
+Specular implements the [Terraform Provider Network Mirror Protocol](https://developer.hashicorp.com/terraform/internals/provider-network-mirror-protocol) to intercept provider requests, cache them locally, and serve subsequent requests from cache. This reduces dependency on upstream registries and improves deployment speeds.
 
 ## Features
 
@@ -13,24 +13,24 @@ Speculum implements the [Terraform Provider Network Mirror Protocol](https://dev
 
 ## Quick Start
 
-> **⚠️ Important**: Terraform requires network mirrors to be served over HTTPS with a valid certificate. Running Speculum on plain HTTP (localhost development excluded) will not work with Terraform. Use a reverse proxy like [Caddy](https://caddyserver.com/), [Traefik](https://traefik.io/), or [nginx](https://nginx.org/) to handle TLS termination.
+> **⚠️ Important**: Terraform requires network mirrors to be served over HTTPS with a valid certificate. Running Specular on plain HTTP (localhost development excluded) will not work with Terraform. Use a reverse proxy like [Caddy](https://caddyserver.com/), [Traefik](https://traefik.io/), or [nginx](https://nginx.org/) to handle TLS termination.
 
 ### Installation
 
-Download the latest release from the [releases page](https://github.com/elisiariocouto/speculum/releases).
+Download the latest release from the [releases page](https://github.com/elisiariocouto/specular/releases).
 
-Alternatively, run Speculum using Docker:
+Alternatively, run Specular using Docker:
 
 ```bash
 # Docker Hub
 docker run -p 8080:8080 \
-  -e SPECULUM_BASE_URL=https://speculum.example.com/ \
-  elisiariocouto/speculum:latest
+  -e SPECULAR_BASE_URL=https://specular.example.com/ \
+  elisiariocouto/specular:latest
 
 # GitHub Container Registry
 docker run -p 8080:8080 \
-  -e SPECULUM_BASE_URL=https://speculum.example.com/ \
-  ghcr.io/elisiariocouto/speculum:latest
+  -e SPECULAR_BASE_URL=https://specular.example.com/ \
+  ghcr.io/elisiariocouto/specular:latest
 ```
 
 ### Using with Terraform
@@ -40,7 +40,7 @@ Configure Terraform to use the mirror by adding to `~/.terraformrc`:
 ```hcl
 provider_installation {
   network_mirror {
-    url = "https://speculum.example.com/"
+    url = "https://specular.example.com/"
   }
 }
 ```
@@ -52,40 +52,40 @@ Then run `terraform init` in any Terraform project and it will use your local mi
 All configuration is via environment variables:
 
 ### Server Configuration
-- `SPECULUM_PORT` (default: `8080`) - HTTP server port
-- `SPECULUM_HOST` (default: `0.0.0.0`) - Bind address
-- `SPECULUM_READ_TIMEOUT` (default: `30s`) - HTTP read timeout
-- `SPECULUM_WRITE_TIMEOUT` (default: `30s`) - HTTP write timeout
-- `SPECULUM_SHUTDOWN_TIMEOUT` (default: `30s`) - Graceful shutdown timeout
+- `SPECULAR_PORT` (default: `8080`) - HTTP server port
+- `SPECULAR_HOST` (default: `0.0.0.0`) - Bind address
+- `SPECULAR_READ_TIMEOUT` (default: `30s`) - HTTP read timeout
+- `SPECULAR_WRITE_TIMEOUT` (default: `30s`) - HTTP write timeout
+- `SPECULAR_SHUTDOWN_TIMEOUT` (default: `30s`) - Graceful shutdown timeout
 
 ### Storage Configuration
-- `SPECULUM_STORAGE_TYPE` (default: `filesystem`) - Storage backend
-- `SPECULUM_CACHE_DIR` (default: `/var/cache/speculum`) - Cache directory
+- `SPECULAR_STORAGE_TYPE` (default: `filesystem`) - Storage backend
+- `SPECULAR_CACHE_DIR` (default: `/var/cache/specular`) - Cache directory
 
 ### Upstream Configuration
-- `SPECULUM_UPSTREAM_TIMEOUT` (default: `60s`) - Upstream request timeout
-- `SPECULUM_UPSTREAM_MAX_RETRIES` (default: `3`) - Max retry attempts
+- `SPECULAR_UPSTREAM_TIMEOUT` (default: `60s`) - Upstream request timeout
+- `SPECULAR_UPSTREAM_MAX_RETRIES` (default: `3`) - Max retry attempts
 
 ### Mirror Configuration
-- `SPECULUM_BASE_URL` (default: `https://speculum.example.com`) - Public base URL of mirror, supports paths
+- `SPECULAR_BASE_URL` (default: `https://specular.example.com`) - Public base URL of mirror, supports paths
 
 ### Observability Configuration
-- `SPECULUM_LOG_LEVEL` (default: `info`) - Log level: debug, info, warn, error
-- `SPECULUM_LOG_FORMAT` (default: `json`) - Log format: json, text
-- `SPECULUM_METRICS_ENABLED` (default: `true`) - Enable Prometheus metrics
+- `SPECULAR_LOG_LEVEL` (default: `info`) - Log level: debug, info, warn, error
+- `SPECULAR_LOG_FORMAT` (default: `json`) - Log format: json, text
+- `SPECULAR_METRICS_ENABLED` (default: `true`) - Enable Prometheus metrics
 
 ## API Endpoints
 
 ### List Versions
 ```
-GET $SPECULUM_BASE_URL/:hostname/:namespace/:type/index.json
+GET $SPECULAR_BASE_URL/:hostname/:namespace/:type/index.json
 ```
 
 Returns available versions of a provider.
 
 ### List Packages
 ```
-GET $SPECULUM_BASE_URL/:hostname/:namespace/:type/:version.json
+GET $SPECULAR_BASE_URL/:hostname/:namespace/:type/:version.json
 ```
 
 Returns available installation packages for a specific version.

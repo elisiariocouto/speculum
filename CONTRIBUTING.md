@@ -9,8 +9,8 @@
 ### Initial Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/elisiariocouto/speculum.git
-   cd speculum
+   git clone https://github.com/elisiariocouto/specular.git
+   cd specular
    ```
 
 2. Install dependencies:
@@ -29,19 +29,19 @@
 make build
 ```
 
-This creates the binary at `bin/speculum`.
+This creates the binary at `bin/specular`.
 
 ## Running Locally
 
 ```bash
 # Set up cache directory
-mkdir -p /tmp/speculum-cache
+mkdir -p /tmp/specular-cache
 
 # Configure environment variables
-export SPECULUM_PORT=8080
-export SPECULUM_HOST=0.0.0.0
-export SPECULUM_CACHE_DIR=/tmp/speculum-cache
-export SPECULUM_BASE_URL=http://localhost:8080
+export SPECULAR_PORT=8080
+export SPECULAR_HOST=0.0.0.0
+export SPECULAR_CACHE_DIR=/tmp/specular-cache
+export SPECULAR_BASE_URL=http://localhost:8080
 
 # Run the server
 make run

@@ -21,11 +21,11 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.StorageType != "filesystem" {
 		t.Fatalf("expected default storage type filesystem, got %s", cfg.StorageType)
 	}
-	if cfg.CacheDir != "/var/cache/speculum" {
-		t.Fatalf("expected default cache dir /var/cache/speculum, got %s", cfg.CacheDir)
+	if cfg.CacheDir != "/var/cache/specular" {
+		t.Fatalf("expected default cache dir /var/cache/specular, got %s", cfg.CacheDir)
 	}
-	if cfg.BaseURL != "https://speculum.example.com" {
-		t.Fatalf("expected default base URL https://speculum.example.com, got %s", cfg.BaseURL)
+	if cfg.BaseURL != "https://specular.example.com" {
+		t.Fatalf("expected default base URL https://specular.example.com, got %s", cfg.BaseURL)
 	}
 	if cfg.LogLevel != "info" || cfg.LogFormat != "json" {
 		t.Fatalf("expected default log level info and format json, got %s/%s", cfg.LogLevel, cfg.LogFormat)
@@ -33,19 +33,19 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadOverrides(t *testing.T) {
-	t.Setenv("SPECULUM_PORT", "9090")
-	t.Setenv("SPECULUM_HOST", "127.0.0.1")
-	t.Setenv("SPECULUM_READ_TIMEOUT", "10s")
-	t.Setenv("SPECULUM_WRITE_TIMEOUT", "11s")
-	t.Setenv("SPECULUM_SHUTDOWN_TIMEOUT", "12s")
-	t.Setenv("SPECULUM_STORAGE_TYPE", "memory")
-	t.Setenv("SPECULUM_CACHE_DIR", "/tmp/speculum-cache")
-	t.Setenv("SPECULUM_UPSTREAM_TIMEOUT", "13s")
-	t.Setenv("SPECULUM_UPSTREAM_MAX_RETRIES", "5")
-	t.Setenv("SPECULUM_BASE_URL", "https://example.com")
-	t.Setenv("SPECULUM_LOG_LEVEL", "debug")
-	t.Setenv("SPECULUM_LOG_FORMAT", "text")
-	t.Setenv("SPECULUM_METRICS_ENABLED", "false")
+	t.Setenv("SPECULAR_PORT", "9090")
+	t.Setenv("SPECULAR_HOST", "127.0.0.1")
+	t.Setenv("SPECULAR_READ_TIMEOUT", "10s")
+	t.Setenv("SPECULAR_WRITE_TIMEOUT", "11s")
+	t.Setenv("SPECULAR_SHUTDOWN_TIMEOUT", "12s")
+	t.Setenv("SPECULAR_STORAGE_TYPE", "memory")
+	t.Setenv("SPECULAR_CACHE_DIR", "/tmp/specular-cache")
+	t.Setenv("SPECULAR_UPSTREAM_TIMEOUT", "13s")
+	t.Setenv("SPECULAR_UPSTREAM_MAX_RETRIES", "5")
+	t.Setenv("SPECULAR_BASE_URL", "https://example.com")
+	t.Setenv("SPECULAR_LOG_LEVEL", "debug")
+	t.Setenv("SPECULAR_LOG_FORMAT", "text")
+	t.Setenv("SPECULAR_METRICS_ENABLED", "false")
 
 	cfg, err := Load()
 	if err != nil {
@@ -61,7 +61,7 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.ReadTimeout != 10*time.Second || cfg.WriteTimeout != 11*time.Second || cfg.ShutdownTimeout != 12*time.Second {
 		t.Fatalf("unexpected timeouts: read %v write %v shutdown %v", cfg.ReadTimeout, cfg.WriteTimeout, cfg.ShutdownTimeout)
 	}
-	if cfg.StorageType != "memory" || cfg.CacheDir != "/tmp/speculum-cache" {
+	if cfg.StorageType != "memory" || cfg.CacheDir != "/tmp/specular-cache" {
 		t.Fatalf("unexpected storage settings: type %s cache %s", cfg.StorageType, cfg.CacheDir)
 	}
 	if cfg.UpstreamTimeout != 13*time.Second || cfg.MaxRetries != 5 {
@@ -85,13 +85,13 @@ func TestLoadInvalidEnv(t *testing.T) {
 		envVal  string
 		errorOn string
 	}{
-		{name: "port", envKey: "SPECULUM_PORT", envVal: "abc", errorOn: "SPECULUM_PORT must be a valid integer"},
-		{name: "read timeout", envKey: "SPECULUM_READ_TIMEOUT", envVal: "notaduration", errorOn: "SPECULUM_READ_TIMEOUT must be a valid duration"},
-		{name: "write timeout", envKey: "SPECULUM_WRITE_TIMEOUT", envVal: "1x", errorOn: "SPECULUM_WRITE_TIMEOUT must be a valid duration"},
-		{name: "shutdown timeout", envKey: "SPECULUM_SHUTDOWN_TIMEOUT", envVal: "1x", errorOn: "SPECULUM_SHUTDOWN_TIMEOUT must be a valid duration"},
-		{name: "upstream timeout", envKey: "SPECULUM_UPSTREAM_TIMEOUT", envVal: "1x", errorOn: "SPECULUM_UPSTREAM_TIMEOUT must be a valid duration"},
-		{name: "max retries", envKey: "SPECULUM_UPSTREAM_MAX_RETRIES", envVal: "one", errorOn: "SPECULUM_UPSTREAM_MAX_RETRIES must be a valid integer"},
-		{name: "metrics", envKey: "SPECULUM_METRICS_ENABLED", envVal: "maybe", errorOn: "SPECULUM_METRICS_ENABLED must be true or false"},
+		{name: "port", envKey: "SPECULAR_PORT", envVal: "abc", errorOn: "SPECULAR_PORT must be a valid integer"},
+		{name: "read timeout", envKey: "SPECULAR_READ_TIMEOUT", envVal: "notaduration", errorOn: "SPECULAR_READ_TIMEOUT must be a valid duration"},
+		{name: "write timeout", envKey: "SPECULAR_WRITE_TIMEOUT", envVal: "1x", errorOn: "SPECULAR_WRITE_TIMEOUT must be a valid duration"},
+		{name: "shutdown timeout", envKey: "SPECULAR_SHUTDOWN_TIMEOUT", envVal: "1x", errorOn: "SPECULAR_SHUTDOWN_TIMEOUT must be a valid duration"},
+		{name: "upstream timeout", envKey: "SPECULAR_UPSTREAM_TIMEOUT", envVal: "1x", errorOn: "SPECULAR_UPSTREAM_TIMEOUT must be a valid duration"},
+		{name: "max retries", envKey: "SPECULAR_UPSTREAM_MAX_RETRIES", envVal: "one", errorOn: "SPECULAR_UPSTREAM_MAX_RETRIES must be a valid integer"},
+		{name: "metrics", envKey: "SPECULAR_METRICS_ENABLED", envVal: "maybe", errorOn: "SPECULAR_METRICS_ENABLED must be true or false"},
 	}
 
 	for _, tt := range tests {

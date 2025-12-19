@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elisiariocouto/speculum/internal/metrics"
+	"github.com/elisiariocouto/specular/internal/metrics"
 	"github.com/go-chi/chi/v5/middleware"
 )
 

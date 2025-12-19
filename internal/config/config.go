@@ -47,70 +47,70 @@ func Load() (*Config, error) {
 		WriteTimeout:      30 * time.Second,
 		ShutdownTimeout:   30 * time.Second,
 		StorageType:       "filesystem",
-		CacheDir:          "/var/cache/speculum",
+		CacheDir:          "/var/cache/specular",
 		UpstreamTimeout:   60 * time.Second,
 		MaxRetries:        3,
 		DiscoveryCacheTTL: 1 * time.Hour,
-		BaseURL:           "https://speculum.example.com",
+		BaseURL:           "https://specular.example.com",
 		LogLevel:          "info",
 		LogFormat:         "json",
 		MetricsEnabled:    true,
 	}
 
 	// Override with environment variables
-	if err := setEnvInt("SPECULUM_PORT", &cfg.Port, "must be a valid integer"); err != nil {
+	if err := setEnvInt("SPECULAR_PORT", &cfg.Port, "must be a valid integer"); err != nil {
 		return nil, err
 	}
 
-	if v := os.Getenv("SPECULUM_HOST"); v != "" {
+	if v := os.Getenv("SPECULAR_HOST"); v != "" {
 		cfg.Host = v
 	}
 
-	if err := setEnvDuration("SPECULUM_READ_TIMEOUT", &cfg.ReadTimeout, "must be a valid duration (e.g., 30s)"); err != nil {
+	if err := setEnvDuration("SPECULAR_READ_TIMEOUT", &cfg.ReadTimeout, "must be a valid duration (e.g., 30s)"); err != nil {
 		return nil, err
 	}
 
-	if err := setEnvDuration("SPECULUM_WRITE_TIMEOUT", &cfg.WriteTimeout, "must be a valid duration (e.g., 30s)"); err != nil {
+	if err := setEnvDuration("SPECULAR_WRITE_TIMEOUT", &cfg.WriteTimeout, "must be a valid duration (e.g., 30s)"); err != nil {
 		return nil, err
 	}
 
-	if err := setEnvDuration("SPECULUM_SHUTDOWN_TIMEOUT", &cfg.ShutdownTimeout, "must be a valid duration (e.g., 30s)"); err != nil {
+	if err := setEnvDuration("SPECULAR_SHUTDOWN_TIMEOUT", &cfg.ShutdownTimeout, "must be a valid duration (e.g., 30s)"); err != nil {
 		return nil, err
 	}
 
-	if v := os.Getenv("SPECULUM_STORAGE_TYPE"); v != "" {
+	if v := os.Getenv("SPECULAR_STORAGE_TYPE"); v != "" {
 		cfg.StorageType = v
 	}
 
-	if v := os.Getenv("SPECULUM_CACHE_DIR"); v != "" {
+	if v := os.Getenv("SPECULAR_CACHE_DIR"); v != "" {
 		cfg.CacheDir = v
 	}
 
-	if err := setEnvDuration("SPECULUM_UPSTREAM_TIMEOUT", &cfg.UpstreamTimeout, "must be a valid duration (e.g., 60s)"); err != nil {
+	if err := setEnvDuration("SPECULAR_UPSTREAM_TIMEOUT", &cfg.UpstreamTimeout, "must be a valid duration (e.g., 60s)"); err != nil {
 		return nil, err
 	}
 
-	if err := setEnvInt("SPECULUM_UPSTREAM_MAX_RETRIES", &cfg.MaxRetries, "must be a valid integer"); err != nil {
+	if err := setEnvInt("SPECULAR_UPSTREAM_MAX_RETRIES", &cfg.MaxRetries, "must be a valid integer"); err != nil {
 		return nil, err
 	}
 
-	if err := setEnvDuration("SPECULUM_DISCOVERY_CACHE_TTL", &cfg.DiscoveryCacheTTL, "must be a valid duration (e.g., 1h)"); err != nil {
+	if err := setEnvDuration("SPECULAR_DISCOVERY_CACHE_TTL", &cfg.DiscoveryCacheTTL, "must be a valid duration (e.g., 1h)"); err != nil {
 		return nil, err
 	}
 
-	if v := os.Getenv("SPECULUM_BASE_URL"); v != "" {
+	if v := os.Getenv("SPECULAR_BASE_URL"); v != "" {
 		cfg.BaseURL = v
 	}
 
-	if v := os.Getenv("SPECULUM_LOG_LEVEL"); v != "" {
+	if v := os.Getenv("SPECULAR_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
 
-	if v := os.Getenv("SPECULUM_LOG_FORMAT"); v != "" {
+	if v := os.Getenv("SPECULAR_LOG_FORMAT"); v != "" {
 		cfg.LogFormat = v
 	}
 
-	if err := setEnvBool("SPECULUM_METRICS_ENABLED", &cfg.MetricsEnabled, "must be true or false"); err != nil {
+	if err := setEnvBool("SPECULAR_METRICS_ENABLED", &cfg.MetricsEnabled, "must be true or false"); err != nil {
 		return nil, err
 	}
 

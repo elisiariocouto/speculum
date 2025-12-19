@@ -1,4 +1,4 @@
-module github.com/elisiariocouto/speculum
+module github.com/elisiariocouto/specular
 
 go 1.25.5
 

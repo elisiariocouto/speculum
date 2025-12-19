@@ -8,13 +8,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/elisiariocouto/speculum/internal/config"
-	"github.com/elisiariocouto/speculum/internal/logger"
-	"github.com/elisiariocouto/speculum/internal/metrics"
-	"github.com/elisiariocouto/speculum/internal/mirror"
-	"github.com/elisiariocouto/speculum/internal/server"
-	"github.com/elisiariocouto/speculum/internal/storage"
-	"github.com/elisiariocouto/speculum/internal/version"
+	"github.com/elisiariocouto/specular/internal/config"
+	"github.com/elisiariocouto/specular/internal/logger"
+	"github.com/elisiariocouto/specular/internal/metrics"
+	"github.com/elisiariocouto/specular/internal/mirror"
+	"github.com/elisiariocouto/specular/internal/server"
+	"github.com/elisiariocouto/specular/internal/storage"
+	"github.com/elisiariocouto/specular/internal/version"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	// Setup logger
 	log := logger.SetupLogger(cfg.LogLevel, cfg.LogFormat)
 
-	log.InfoContext(context.Background(), "Speculum starting",
+	log.InfoContext(context.Background(), "Specular starting",
 		slog.String("version", version.Version),
 		slog.String("commit", version.Commit),
 		slog.String("build_date", version.BuildDate),
@@ -122,5 +122,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.InfoContext(context.Background(), "Speculum shutdown complete")
+	log.InfoContext(context.Background(), "Specular shutdown complete")
 }

@@ -19,20 +19,20 @@ RUN set -e; \
     COMMIT=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}; \
     BUILD_DATE=${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}; \
     GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w -X github.com/elisiariocouto/speculum/internal/version.Version=$VERSION -X github.com/elisiariocouto/speculum/internal/version.Commit=$COMMIT -X github.com/elisiariocouto/speculum/internal/version.BuildDate=$BUILD_DATE" -o /out/speculum ./cmd/speculum
+    go build -trimpath -ldflags="-s -w -X github.com/elisiariocouto/specular/internal/version.Version=$VERSION -X github.com/elisiariocouto/specular/internal/version.Commit=$COMMIT -X github.com/elisiariocouto/specular/internal/version.BuildDate=$BUILD_DATE" -o /out/specular ./cmd/specular
 
 # Runtime stage
 FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /
 
-ENV SPECULUM_PORT=8080 \
-    SPECULUM_HOST=0.0.0.0 \
-    SPECULUM_CACHE_DIR=/tmp/speculum-cache \
-    SPECULUM_BASE_URL=http://localhost:8080 \
-    SPECULUM_STORAGE_TYPE=filesystem
+ENV SPECULAR_PORT=8080 \
+    SPECULAR_HOST=0.0.0.0 \
+    SPECULAR_CACHE_DIR=/tmp/specular-cache \
+    SPECULAR_BASE_URL=http://localhost:8080 \
+    SPECULAR_STORAGE_TYPE=filesystem
 
-COPY --from=builder /out/speculum /speculum
+COPY --from=builder /out/specular /specular
 
 EXPOSE 8080
 USER nonroot:nonroot
-ENTRYPOINT ["/speculum"]
+ENTRYPOINT ["/specular"]

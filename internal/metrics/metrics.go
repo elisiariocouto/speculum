@@ -37,7 +37,7 @@ func New() *Metrics {
 	m := &Metrics{
 		HTTPRequestsTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_http_requests_total",
+				Name: "specular_http_requests_total",
 				Help: "Total number of HTTP requests",
 			},
 			[]string{"method", "path", "status"},
@@ -45,7 +45,7 @@ func New() *Metrics {
 
 		HTTPRequestDuration: *promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "speculum_http_request_duration_seconds",
+				Name:    "specular_http_request_duration_seconds",
 				Help:    "HTTP request duration in seconds",
 				Buckets: prometheus.DefBuckets,
 			},
@@ -54,7 +54,7 @@ func New() *Metrics {
 
 		HTTPRequestSize: *promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "speculum_http_request_size_bytes",
+				Name:    "specular_http_request_size_bytes",
 				Help:    "HTTP request size in bytes",
 				Buckets: prometheus.ExponentialBuckets(100, 10, 8),
 			},
@@ -63,7 +63,7 @@ func New() *Metrics {
 
 		HTTPResponseSize: *promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "speculum_http_response_size_bytes",
+				Name:    "specular_http_response_size_bytes",
 				Help:    "HTTP response size in bytes",
 				Buckets: prometheus.ExponentialBuckets(100, 10, 8),
 			},
@@ -72,7 +72,7 @@ func New() *Metrics {
 
 		CacheHitsTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_cache_hits_total",
+				Name: "specular_cache_hits_total",
 				Help: "Total number of cache hits",
 			},
 			[]string{"cache_type"},
@@ -80,7 +80,7 @@ func New() *Metrics {
 
 		CacheMissesTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_cache_misses_total",
+				Name: "specular_cache_misses_total",
 				Help: "Total number of cache misses",
 			},
 			[]string{"cache_type"},
@@ -88,7 +88,7 @@ func New() *Metrics {
 
 		UpstreamRequestsTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_upstream_requests_total",
+				Name: "specular_upstream_requests_total",
 				Help: "Total number of upstream registry requests",
 			},
 			[]string{"status"},
@@ -96,7 +96,7 @@ func New() *Metrics {
 
 		UpstreamRequestDuration: *promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "speculum_upstream_request_duration_seconds",
+				Name:    "specular_upstream_request_duration_seconds",
 				Help:    "Upstream request duration in seconds",
 				Buckets: prometheus.DefBuckets,
 			},
@@ -105,7 +105,7 @@ func New() *Metrics {
 
 		UpstreamErrors: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_upstream_errors_total",
+				Name: "specular_upstream_errors_total",
 				Help: "Total number of upstream errors",
 			},
 			[]string{"error_type"},
@@ -113,7 +113,7 @@ func New() *Metrics {
 
 		StorageOperationsTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_storage_operations_total",
+				Name: "specular_storage_operations_total",
 				Help: "Total number of storage operations",
 			},
 			[]string{"operation", "status"},
@@ -121,7 +121,7 @@ func New() *Metrics {
 
 		StorageOperationDuration: *promauto.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "speculum_storage_operation_duration_seconds",
+				Name:    "specular_storage_operation_duration_seconds",
 				Help:    "Storage operation duration in seconds",
 				Buckets: prometheus.DefBuckets,
 			},
@@ -130,7 +130,7 @@ func New() *Metrics {
 
 		ErrorsTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "speculum_errors_total",
+				Name: "specular_errors_total",
 				Help: "Total number of errors",
 			},
 			[]string{"component", "error_type"},

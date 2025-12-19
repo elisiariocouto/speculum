@@ -148,11 +148,11 @@ func (fs *FilesystemStorage) versionPath(hostname, namespace, providerType, vers
 }
 
 // versionsResponsePath constructs the filesystem path for the full versions API response
-// Stored in internal cache: .speculum-internal/hostname/namespace/type/versions.json
+// Stored in internal cache: .specular-internal/hostname/namespace/type/versions.json
 func (fs *FilesystemStorage) versionsResponsePath(hostname, namespace, providerType string) string {
 	return filepath.Join(
 		fs.cacheDir,
-		".speculum-internal",
+		".specular-internal",
 		hostname,
 		namespace,
 		providerType,

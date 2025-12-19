@@ -14,7 +14,7 @@ body = """
     {% for commit in commits
     | filter(attribute="scope")
     | sort(attribute="scope") %}
-        - **{{commit.scope}}:** {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=8, end="") }}](https://github.com/elisiariocouto/speculum/commit/{{ commit.id }}))
+        - **{{commit.scope}}:** {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=8, end="") }}](https://github.com/elisiariocouto/specular/commit/{{ commit.id }}))
         {%- if commit.breaking %}
         {% raw %}  {% endraw %}- **BREAKING**: {{commit.breaking_description}}
         {%- endif -%}
@@ -22,7 +22,7 @@ body = """
     {% for commit in commits %}
         {%- if commit.scope -%}
         {% else -%}
-            -  {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=8, end="") }}](https://github.com/elisiariocouto/speculum/commit/{{ commit.id }}))
+            -  {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=8, end="") }}](https://github.com/elisiariocouto/specular/commit/{{ commit.id }}))
             {% if commit.breaking -%}
             {% raw %}  {% endraw %}- **BREAKING**: {{commit.breaking_description}}
             {% endif -%}

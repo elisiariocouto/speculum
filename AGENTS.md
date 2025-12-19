@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Speculum is a caching proxy mirror for Terraform providers that implements the [Terraform Provider Network Mirror Protocol](https://developer.hashicorp.com/terraform/internals/provider-network-mirror-protocol). It intercepts provider requests, caches them locally, and serves subsequent requests from cache.
+Specular is a caching proxy mirror for Terraform providers that implements the [Terraform Provider Network Mirror Protocol](https://developer.hashicorp.com/terraform/internals/provider-network-mirror-protocol). It intercepts provider requests, caches them locally, and serves subsequent requests from cache.
 
 ## Setup for Development
 
@@ -39,7 +39,7 @@ git commit --no-verify
 ## Commands
 
 ### Building and Running
-- `make build` - Build the binary to `bin/speculum`
+- `make build` - Build the binary to `bin/specular`
 - `make run` - Build and run the application
 - `make clean` - Remove build artifacts
 
@@ -60,10 +60,10 @@ git commit --no-verify
 ### Running Locally
 Required environment variables for local development:
 ```bash
-export SPECULUM_PORT=8080
-export SPECULUM_HOST=0.0.0.0
-export SPECULUM_CACHE_DIR=/tmp/speculum-cache
-export SPECULUM_BASE_URL=http://localhost:8080
+export SPECULAR_PORT=8080
+export SPECULAR_HOST=0.0.0.0
+export SPECULAR_CACHE_DIR=/tmp/specular-cache
+export SPECULAR_BASE_URL=http://localhost:8080
 ```
 
 ## Architecture
@@ -72,7 +72,7 @@ export SPECULUM_BASE_URL=http://localhost:8080
 
 The application follows a clean layered architecture:
 
-1. **cmd/speculum/main.go** - Application entry point that wires up all components
+1. **cmd/specular/main.go** - Application entry point that wires up all components
    - Loads configuration from environment variables
    - Initializes storage backend (filesystem or memory)
    - Creates upstream client with retry logic
@@ -100,7 +100,7 @@ The application follows a clean layered architecture:
    - Filesystem layout matches `terraform providers mirror` structure:
      - Index files: `hostname/namespace/type/index.json`
      - Version metadata: `hostname/namespace/type/VERSION.json`
-     - Versions API response cache: `.speculum-internal/hostname/namespace/type/versions.json`
+     - Versions API response cache: `.specular-internal/hostname/namespace/type/versions.json`
      - Archives: stored with full domain preservation (e.g., `registry.terraform.io/hashicorp/aws/terraform-provider-aws_6.26.0_darwin_arm64.zip`)
 
 5. **internal/mirror/upstream.go** - Upstream registry client
@@ -109,7 +109,7 @@ The application follows a clean layered architecture:
    - Timeout configuration per request
 
 6. **internal/config** - Configuration management
-   - All configuration from environment variables with `SPECULUM_` prefix
+   - All configuration from environment variables with `SPECULAR_` prefix
    - Validation in `Validate()` method
    - See internal/config/config.go:10-35 for complete Config struct
 
@@ -141,8 +141,8 @@ Implements Terraform Provider Network Mirror Protocol v1:
 ## Configuration Notes
 
 - All configuration is environment-based (no config files)
-- `SPECULUM_BASE_URL` must match the public URL where the mirror is accessible
-- Storage type can be switched between "filesystem" and "memory" via `SPECULUM_STORAGE_TYPE`
+- `SPECULAR_BASE_URL` must match the public URL where the mirror is accessible
+- Storage type can be switched between "filesystem" and "memory" via `SPECULAR_STORAGE_TYPE`
 - Upstream registry is configurable for testing or alternate registries
 - Filesystem structure matches `terraform providers mirror` for compatibility with existing tooling
 

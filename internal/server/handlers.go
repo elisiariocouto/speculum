@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elisiariocouto/speculum/internal/metrics"
-	"github.com/elisiariocouto/speculum/internal/mirror"
+	"github.com/elisiariocouto/specular/internal/metrics"
+	"github.com/elisiariocouto/specular/internal/mirror"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
