@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -117,22 +116,4 @@ func (rw *responseWriter) Flush() {
 	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
-}
-
-// ReadCloserWithSize wraps an io.ReadCloser and tracks bytes read
-type ReadCloserWithSize struct {
-	io.ReadCloser
-	bytesRead int64
-}
-
-// Read reads from the underlying reader and tracks bytes read
-func (r *ReadCloserWithSize) Read(p []byte) (int, error) {
-	n, err := r.ReadCloser.Read(p)
-	r.bytesRead += int64(n)
-	return n, err
-}
-
-// BytesRead returns the total bytes read
-func (r *ReadCloserWithSize) BytesRead() int64 {
-	return r.bytesRead
 }

@@ -30,6 +30,55 @@ func NewHandlers(m *mirror.Mirror, metrics *metrics.Metrics, logger *slog.Logger
 	}
 }
 
+// handleRequest is a helper that handles the common request/error/metrics pattern
+// It takes a fetch function that retrieves the data and a write function that writes the response
+func (h *Handlers) handleRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+	resourceType string,
+	logAttrs []slog.Attr,
+	fetchData func() (any, error),
+	writeResponse func(any) error,
+) {
+	// Log request
+	attrs := make([]any, len(logAttrs))
+	for i, attr := range logAttrs {
+		attrs[i] = attr
+	}
+	h.logger.InfoContext(r.Context(), resourceType+" request", attrs...)
+
+	// Fetch data and measure duration
+	start := time.Now()
+	data, err := fetchData()
+	duration := time.Since(start).Seconds()
+
+	// Handle errors
+	if err != nil {
+		if err == mirror.ErrNotFound || err == io.EOF {
+			h.metrics.RecordCacheMiss(resourceType)
+			h.logger.InfoContext(r.Context(), resourceType+" not found", attrs...)
+			http.NotFound(w, r)
+			return
+		}
+
+		h.metrics.RecordError(resourceType+"_handler", "fetch_failed")
+		h.logger.ErrorContext(r.Context(), "failed to get "+resourceType,
+			append(attrs, slog.String("error", err.Error()))...)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Record success metrics
+	h.metrics.RecordCacheHit(resourceType)
+	h.metrics.RecordUpstreamRequest(http.StatusOK, duration, resourceType)
+
+	// Write response
+	if err := writeResponse(data); err != nil {
+		h.logger.ErrorContext(r.Context(), "failed to write response",
+			slog.String("error", err.Error()))
+	}
+}
+
 // MetadataHandler handles index.json, version.json, and archive requests
 // Routes: /:hostname/:namespace/:type/index.json, /:hostname/:namespace/:type/:version.json, or /:hostname/:namespace/:type/archive.zip
 func (h *Handlers) MetadataHandler(w http.ResponseWriter, r *http.Request) {
@@ -63,47 +112,22 @@ func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "namespace")
 	providerType := chi.URLParam(r, "type")
 
-	h.logger.InfoContext(r.Context(), "index request",
-		slog.String("hostname", hostname),
-		slog.String("namespace", namespace),
-		slog.String("type", providerType),
-	)
-
-	start := time.Now()
-	data, err := h.mirror.GetIndex(r.Context(), hostname, namespace, providerType)
-	duration := time.Since(start).Seconds()
-
-	if err != nil {
-		if err == mirror.ErrNotFound {
-			h.metrics.RecordCacheMiss("index")
-			h.logger.InfoContext(r.Context(), "provider not found",
-				slog.String("hostname", hostname),
-				slog.String("namespace", namespace),
-				slog.String("type", providerType),
-			)
-			http.NotFound(w, r)
-			return
-		}
-
-		h.metrics.RecordError("index_handler", "fetch_failed")
-		h.logger.ErrorContext(r.Context(), "failed to get index",
+	h.handleRequest(w, r, "index",
+		[]slog.Attr{
 			slog.String("hostname", hostname),
 			slog.String("namespace", namespace),
 			slog.String("type", providerType),
-			slog.String("error", err.Error()),
-		)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	h.metrics.RecordCacheHit("index")
-	h.metrics.RecordUpstreamRequest(http.StatusOK, duration, "index")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	if _, err := w.Write(data); err != nil {
-		h.logger.ErrorContext(r.Context(), "failed to write response", slog.String("error", err.Error()))
-	}
+		},
+		func() (any, error) {
+			return h.mirror.GetIndex(r.Context(), hostname, namespace, providerType)
+		},
+		func(data any) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			_, err := w.Write(data.([]byte))
+			return err
+		},
+	)
 }
 
 // VersionHandlerWithParams handles version requests with explicit version parameter
@@ -112,50 +136,23 @@ func (h *Handlers) VersionHandlerWithParams(w http.ResponseWriter, r *http.Reque
 	namespace := chi.URLParam(r, "namespace")
 	providerType := chi.URLParam(r, "type")
 
-	h.logger.InfoContext(r.Context(), "version request",
-		slog.String("hostname", hostname),
-		slog.String("namespace", namespace),
-		slog.String("type", providerType),
-		slog.String("version", version),
-	)
-
-	start := time.Now()
-	data, err := h.mirror.GetVersion(r.Context(), hostname, namespace, providerType, version)
-	duration := time.Since(start).Seconds()
-
-	if err != nil {
-		if err == mirror.ErrNotFound {
-			h.metrics.RecordCacheMiss("version")
-			h.logger.InfoContext(r.Context(), "version not found",
-				slog.String("hostname", hostname),
-				slog.String("namespace", namespace),
-				slog.String("type", providerType),
-				slog.String("version", version),
-			)
-			http.NotFound(w, r)
-			return
-		}
-
-		h.metrics.RecordError("version_handler", "fetch_failed")
-		h.logger.ErrorContext(r.Context(), "failed to get version",
+	h.handleRequest(w, r, "version",
+		[]slog.Attr{
 			slog.String("hostname", hostname),
 			slog.String("namespace", namespace),
 			slog.String("type", providerType),
 			slog.String("version", version),
-			slog.String("error", err.Error()),
-		)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	h.metrics.RecordCacheHit("version")
-	h.metrics.RecordUpstreamRequest(http.StatusOK, duration, "version")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	if _, err := w.Write(data); err != nil {
-		h.logger.ErrorContext(r.Context(), "failed to write response", slog.String("error", err.Error()))
-	}
+		},
+		func() (any, error) {
+			return h.mirror.GetVersion(r.Context(), hostname, namespace, providerType, version)
+		},
+		func(data any) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			_, err := w.Write(data.([]byte))
+			return err
+		},
+	)
 }
 
 // VersionHandler handles GET /:hostname/:namespace/:type/:version.json (legacy, kept for compatibility)
@@ -179,49 +176,31 @@ func (h *Handlers) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Construct cache path
 	archivePath := fmt.Sprintf("%s/%s/%s/%s", hostname, namespace, providerType, filename)
 
-	h.logger.InfoContext(r.Context(), "download request",
-		slog.String("hostname", hostname),
-		slog.String("namespace", namespace),
-		slog.String("type", providerType),
-		slog.String("version", version),
-		slog.String("os", os),
-		slog.String("arch", arch),
-		slog.String("filename", filename))
+	h.handleRequest(w, r, "archive",
+		[]slog.Attr{
+			slog.String("hostname", hostname),
+			slog.String("namespace", namespace),
+			slog.String("type", providerType),
+			slog.String("version", version),
+			slog.String("os", os),
+			slog.String("arch", arch),
+			slog.String("filename", filename),
+		},
+		func() (any, error) {
+			return h.mirror.GetArchive(r.Context(), hostname, namespace, providerType, version, os, arch, archivePath)
+		},
+		func(data any) error {
+			reader := data.(io.ReadCloser)
+			defer reader.Close()
 
-	start := time.Now()
-	reader, err := h.mirror.GetArchive(r.Context(), hostname, namespace, providerType, version, os, arch, archivePath)
-	duration := time.Since(start).Seconds()
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Cache-Control", "public, max-age=31536000") // 1 year cache for immutable archives
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 
-	if err != nil {
-		if err == io.EOF || err == mirror.ErrNotFound {
-			h.metrics.RecordCacheMiss("archive")
-			h.logger.InfoContext(r.Context(), "archive not found",
-				slog.String("path", archivePath))
-			http.NotFound(w, r)
-			return
-		}
-
-		h.metrics.RecordError("download_handler", "fetch_failed")
-		h.logger.ErrorContext(r.Context(), "failed to get archive",
-			slog.String("path", archivePath),
-			slog.String("error", err.Error()))
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	defer reader.Close()
-
-	h.metrics.RecordCacheHit("archive")
-	h.metrics.RecordUpstreamRequest(http.StatusOK, duration, "archive")
-
-	// Set response headers for archive download
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Cache-Control", "public, max-age=31536000") // 1 year cache for immutable archives
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-
-	// Stream the archive to the client
-	if _, err := io.Copy(w, reader); err != nil {
-		h.logger.ErrorContext(r.Context(), "failed to stream archive", slog.String("error", err.Error()))
-	}
+			_, err := io.Copy(w, reader)
+			return err
+		},
+	)
 }
 
 // HealthHandler handles GET /health
@@ -235,7 +214,7 @@ func (h *Handlers) HealthHandler(w http.ResponseWriter, r *http.Request) {
 // Returns 404 if metrics are disabled
 func (h *Handlers) MetricsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.metrics == nil {
+		if !h.metrics.Enabled() {
 			http.NotFound(w, r)
 			return
 		}

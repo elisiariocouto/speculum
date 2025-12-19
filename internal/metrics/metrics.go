@@ -9,6 +9,8 @@ import (
 
 // Metrics holds all Prometheus metrics
 type Metrics struct {
+	enabled bool // true if metrics are actually enabled, false for noop
+
 	// HTTP request metrics
 	HTTPRequestsTotal   prometheus.CounterVec
 	HTTPRequestDuration prometheus.HistogramVec
@@ -35,6 +37,7 @@ type Metrics struct {
 // New creates and registers all metrics
 func New() *Metrics {
 	m := &Metrics{
+		enabled: true,
 		HTTPRequestsTotal: *promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "specular_http_requests_total",
@@ -142,9 +145,6 @@ func New() *Metrics {
 
 // RecordHTTPRequest records HTTP request metrics
 func (m *Metrics) RecordHTTPRequest(method, path string, status int, duration float64, reqSize, respSize int64) {
-	if m == nil {
-		return
-	}
 	statusStr := fmt.Sprintf("%d", status)
 	m.HTTPRequestsTotal.WithLabelValues(method, path, statusStr).Inc()
 	m.HTTPRequestDuration.WithLabelValues(method, path).Observe(duration)
@@ -154,25 +154,16 @@ func (m *Metrics) RecordHTTPRequest(method, path string, status int, duration fl
 
 // RecordCacheHit records a cache hit
 func (m *Metrics) RecordCacheHit(cacheType string) {
-	if m == nil {
-		return
-	}
 	m.CacheHitsTotal.WithLabelValues(cacheType).Inc()
 }
 
 // RecordCacheMiss records a cache miss
 func (m *Metrics) RecordCacheMiss(cacheType string) {
-	if m == nil {
-		return
-	}
 	m.CacheMissesTotal.WithLabelValues(cacheType).Inc()
 }
 
 // RecordUpstreamRequest records an upstream request
 func (m *Metrics) RecordUpstreamRequest(status int, duration float64, endpoint string) {
-	if m == nil {
-		return
-	}
 	statusStr := fmt.Sprintf("%d", status)
 	m.UpstreamRequestsTotal.WithLabelValues(statusStr).Inc()
 	m.UpstreamRequestDuration.WithLabelValues(endpoint).Observe(duration)
@@ -180,31 +171,27 @@ func (m *Metrics) RecordUpstreamRequest(status int, duration float64, endpoint s
 
 // RecordUpstreamError records an upstream error
 func (m *Metrics) RecordUpstreamError(errorType string) {
-	if m == nil {
-		return
-	}
 	m.UpstreamErrors.WithLabelValues(errorType).Inc()
 }
 
 // RecordStorageOperation records a storage operation
 func (m *Metrics) RecordStorageOperation(operation, status string, duration float64) {
-	if m == nil {
-		return
-	}
 	m.StorageOperationsTotal.WithLabelValues(operation, status).Inc()
 	m.StorageOperationDuration.WithLabelValues(operation).Observe(duration)
 }
 
 // RecordError records an error
 func (m *Metrics) RecordError(component, errorType string) {
-	if m == nil {
-		return
-	}
 	m.ErrorsTotal.WithLabelValues(component, errorType).Inc()
 }
 
 // Noop returns a no-op metrics instance that does nothing
 // Use this when metrics are disabled to avoid nil pointer checks everywhere
 func Noop() *Metrics {
-	return &Metrics{}
+	return &Metrics{enabled: false}
+}
+
+// Enabled returns true if metrics collection is enabled
+func (m *Metrics) Enabled() bool {
+	return m.enabled
 }

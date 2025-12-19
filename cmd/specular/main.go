@@ -78,7 +78,7 @@ func main() {
 		m = metrics.New()
 		log.InfoContext(context.Background(), "metrics enabled")
 	} else {
-		m = nil
+		m = metrics.Noop()
 		log.InfoContext(context.Background(), "metrics disabled")
 	}
 
