@@ -33,6 +33,8 @@ docker run -p 8080:8080 \
   ghcr.io/elisiariocouto/specular:latest
 ```
 
+The default images are based on distroless. Alpine-based images are available with the `-alpine` suffix (e.g., `latest-alpine`, `2025.12.3-alpine`) for a lightweight footprint. These are suitable for resource-constrained environments.
+
 ### Using with Terraform
 
 Configure Terraform to use the mirror by adding to `~/.terraformrc`:

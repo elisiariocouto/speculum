@@ -105,6 +105,31 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Docker meta (Alpine)
+        id: meta-alpine
+        uses: docker/metadata-action@v5
+        with:
+          flavor: |
+            latest=false
+          images: |
+            elisiariocouto/specular
+            ghcr.io/elisiariocouto/specular
+          tags: |
+            type=ref,event=tag,suffix=-alpine
+            type=semver,pattern={{version}}-alpine
+            type=semver,pattern={{major}}.{{minor}}-alpine
+            type=raw,value=latest-alpine
+
+      - name: Build and push (Alpine)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.alpine
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-alpine.outputs.tags }}
+          labels: ${{ steps.meta-alpine.outputs.labels }}
+
   create-github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest

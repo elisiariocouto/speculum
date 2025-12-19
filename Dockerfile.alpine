@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.25 AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
 ENV CGO_ENABLED=0
@@ -22,11 +22,12 @@ RUN set -e; \
     go build -trimpath -ldflags="-s -w -X github.com/elisiariocouto/specular/internal/version.Version=$VERSION -X github.com/elisiariocouto/specular/internal/version.Commit=$COMMIT -X github.com/elisiariocouto/specular/internal/version.BuildDate=$BUILD_DATE" -o /out/specular ./cmd/specular
 
 # Runtime stage
-FROM gcr.io/distroless/base-debian12:nonroot
+FROM alpine:latest
 WORKDIR /
+
+RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /out/specular /specular
 
 EXPOSE 8080
-USER nonroot:nonroot
 ENTRYPOINT ["/specular"]

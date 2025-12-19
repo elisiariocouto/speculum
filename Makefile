@@ -57,7 +57,13 @@ deps: ## Download and tidy dependencies
 docker-build: ## Build Docker image
 	docker build -t $(BINARY_NAME):latest .
 
+docker-build-alpine: ## Build Alpine Docker image
+	docker build -f Dockerfile.alpine -t $(BINARY_NAME):latest-alpine .
+
 docker-run: docker-build ## Build and run Docker container
 	docker run -p 8080:8080 -v /tmp/specular-cache:/var/cache/specular $(BINARY_NAME):latest
+
+docker-run-alpine: docker-build-alpine ## Build and run Alpine Docker container
+	docker run -p 8080:8080 -v /tmp/specular-cache:/var/cache/specular $(BINARY_NAME):latest-alpine
 
 .DEFAULT_GOAL := help
