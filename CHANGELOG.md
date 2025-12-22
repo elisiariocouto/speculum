@@ -1,4 +1,28 @@
 
+## 2025.12.4 (2025/12/22)
+
+### Bug Fixes
+
+- **build:** Pass version build args to Docker builds ([3aa0126b](https://github.com/elisiariocouto/specular/commit/3aa0126bd3ed16c08e3ac8e671a022b2d60c2992))
+
+
+### Documentation
+
+-  Clarify API endpoint structure with /terraform/providers prefix ([94b8d21b](https://github.com/elisiariocouto/specular/commit/94b8d21b1ae3982c908c9afc28dbbd09e6617c9b))
+
+
+### Refactor
+
+-  Simplify codebase by removing duplication and dead code ([6a7ca6fd](https://github.com/elisiariocouto/specular/commit/6a7ca6fdcececa4c1bd678f20133547f35caff4f))
+
+
+### Testing
+
+- **mirror:** Add comprehensive test coverage for mirror service ([75b7e336](https://github.com/elisiariocouto/specular/commit/75b7e336a7daeb05b20d8513c134588dee3764ce))
+- **server:** Add HTTP handler tests with 50% coverage ([568f28c4](https://github.com/elisiariocouto/specular/commit/568f28c4fd93fb5e29585f7acd13f95b4d899469))
+
+
+
 ## 2025.12.3 (2025/12/19)
 
 ### Bug Fixes
