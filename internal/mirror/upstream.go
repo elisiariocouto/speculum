@@ -29,7 +29,6 @@ func NewUpstreamClient(timeout time.Duration, maxRetries int, discoveryCacheTTL 
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
-			DisableCompression:  false,
 		},
 	}
 
@@ -71,28 +70,25 @@ func (uc *UpstreamClient) FetchIndex(ctx context.Context, hostname, namespace, p
 	// Use service discovery to get the providers endpoint
 	endpoint, err := uc.getProvidersEndpoint(ctx, hostname)
 	if err != nil {
-		uc.logger.DebugContext(ctx, "service discovery failed, using fallback",
-			slog.String("hostname", hostname),
-			slog.String("error", err.Error()))
 		// Fallback to mirror protocol format
 		url := fmt.Sprintf("https://%s/%s/%s/index.json", hostname, namespace, providerType)
+
+		uc.logger.DebugContext(ctx, "service discovery failed, using mirror protocol fallback",
+			slog.String("url", url),
+			slog.String("error", err.Error()))
 
 		body, status, fetchErr := uc.fetch(ctx, url)
 		if fetchErr != nil {
 			return nil, nil, fetchErr
 		}
 
-		if status == http.StatusNotFound {
-			return nil, nil, ErrNotFound
-		}
-
-		if status != http.StatusOK {
-			return nil, nil, fmt.Errorf("unexpected status code: %d", status)
+		if statusErr := checkStatusCode(status); statusErr != nil {
+			return nil, nil, statusErr
 		}
 
 		var response IndexResponse
-		if err := json.Unmarshal(body, &response); err != nil {
-			return nil, nil, fmt.Errorf("failed to parse index response: %w", err)
+		if err := parseJSON(body, &response, "index"); err != nil {
+			return nil, nil, err
 		}
 
 		return &response, nil, nil
@@ -102,22 +98,15 @@ func (uc *UpstreamClient) FetchIndex(ctx context.Context, hostname, namespace, p
 	url := fmt.Sprintf("%s/%s/%s/versions", endpoint, namespace, providerType)
 
 	uc.logger.DebugContext(ctx, "fetching provider versions from upstream",
-		slog.String("url", url),
-		slog.String("hostname", hostname),
-		slog.String("namespace", namespace),
-		slog.String("type", providerType))
+		slog.String("url", url))
 
 	body, status, err := uc.fetch(ctx, url)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if status == http.StatusNotFound {
-		return nil, nil, ErrNotFound
-	}
-
-	if status != http.StatusOK {
-		return nil, nil, fmt.Errorf("unexpected status code: %d", status)
+	if statusErr := checkStatusCode(status); statusErr != nil {
+		return nil, nil, statusErr
 	}
 
 	// Convert registry API response to mirror protocol format
@@ -151,23 +140,19 @@ func (uc *UpstreamClient) FetchVersion(ctx context.Context, hostname, namespace,
 		return nil, err
 	}
 
-	if status == http.StatusNotFound {
-		return nil, ErrNotFound
-	}
-
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", status)
+	if statusErr := checkStatusCode(status); statusErr != nil {
+		return nil, statusErr
 	}
 
 	var response VersionResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse version response: %w", err)
+	if err := parseJSON(body, &response, "version"); err != nil {
+		return nil, err
 	}
 
 	return &response, nil
 }
 
-// FetchArchive fetches a provider archive from a URL
+// FetchArchive fetches a provider archive from a URL with retry logic
 // The archiveURL must be an absolute URL
 func (uc *UpstreamClient) FetchArchive(ctx context.Context, archiveURL string) (io.ReadCloser, error) {
 	// Validate URL
@@ -176,7 +161,7 @@ func (uc *UpstreamClient) FetchArchive(ctx context.Context, archiveURL string) (
 		return nil, fmt.Errorf("invalid archive URL: %w", err)
 	}
 
-	if parsedURL.Scheme == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return nil, fmt.Errorf("archive URL must use http or https scheme, got: %s", parsedURL.Scheme)
 	}
 
@@ -184,22 +169,61 @@ func (uc *UpstreamClient) FetchArchive(ctx context.Context, archiveURL string) (
 		return nil, fmt.Errorf("archive URL must have a host")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+	// Use fetch with retry logic, then return the response body directly
+	// Archives need to be streamed, so we can't use handleResponse
+	var lastErr error
 
-	resp, err := uc.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch archive: %w", err)
-	}
+	for attempt := 0; attempt <= uc.maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
+		resp, err := uc.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			// Only retry on network errors if we have attempts left
+			if attempt < uc.maxRetries {
+				if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
+					return nil, backoffErr
+				}
+				continue
+			}
+			// Last attempt failed
+			return nil, fmt.Errorf("failed to fetch archive: %w", lastErr)
+		}
+
+		// Don't retry on client errors (4xx) - return immediately
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		// Handle success (2xx-3xx) or retry on server errors (5xx)
+		if uc.shouldRetry(resp.StatusCode, attempt) {
+			resp.Body.Close()
+			if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
+				return nil, backoffErr
+			}
+			lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
+			continue
+		}
+
+		// Success (2xx-3xx)
+		if resp.StatusCode == http.StatusOK {
+			return resp.Body, nil
+		}
+
+		// Final attempt with non-OK status
 		resp.Body.Close()
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	return resp.Body, nil
+	// Should not reach here
+	if lastErr != nil {
+		return nil, fmt.Errorf("failed to fetch archive: %w", lastErr)
+	}
+	return nil, fmt.Errorf("unexpected state: max retries exceeded")
 }
 
 // handleResponse processes HTTP response and extracts body, with proper cleanup
@@ -214,10 +238,7 @@ func (uc *UpstreamClient) handleResponse(resp *http.Response) ([]byte, error) {
 
 // shouldRetry determines if a request should be retried based on status code
 func (uc *UpstreamClient) shouldRetry(statusCode int, attempt int) bool {
-	if statusCode >= 500 && attempt < uc.maxRetries {
-		return true
-	}
-	return false
+	return statusCode >= 500 && attempt < uc.maxRetries
 }
 
 // exponentialBackoff waits for exponential backoff duration, respecting context cancellation
@@ -228,6 +249,25 @@ func exponentialBackoff(ctx context.Context, attempt int) error {
 	case <-time.After(time.Duration(1<<uint(attempt)) * time.Second):
 		return nil
 	}
+}
+
+// checkStatusCode validates HTTP status and returns appropriate error
+func checkStatusCode(status int) error {
+	if status == http.StatusNotFound {
+		return ErrNotFound
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", status)
+	}
+	return nil
+}
+
+// parseJSON unmarshals JSON data into a target struct
+func parseJSON(data []byte, v interface{}, responseType string) error {
+	if err := json.Unmarshal(data, v); err != nil {
+		return fmt.Errorf("failed to parse %s response: %w", responseType, err)
+	}
+	return nil
 }
 
 // fetch performs an HTTP GET request with retry logic
@@ -244,24 +284,26 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 		resp, err := uc.httpClient.Do(req)
 		if err != nil {
 			lastErr = err
+			// Only retry on network errors if we have attempts left
 			if attempt < uc.maxRetries {
 				if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
 					return nil, 0, backoffErr
 				}
 				continue
 			}
-			continue
+			// Last attempt failed
+			return nil, lastStatus, lastErr
 		}
 
 		lastStatus = resp.StatusCode
 
-		// Don't retry on client errors (4xx)
+		// Don't retry on client errors (4xx) - return immediately
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			body, err := uc.handleResponse(resp)
 			return body, resp.StatusCode, err
 		}
 
-		// Retry on server errors (5xx)
+		// Handle success (2xx-3xx) or retry on server errors (5xx)
 		if uc.shouldRetry(resp.StatusCode, attempt) {
 			resp.Body.Close()
 			if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
@@ -271,15 +313,16 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 			continue
 		}
 
-		// Success or final attempt
+		// Success (2xx-3xx) on this attempt, or final attempt with 5xx
 		body, err := uc.handleResponse(resp)
 		return body, resp.StatusCode, err
 	}
 
+	// Should not reach here, but handle gracefully
 	if lastErr != nil {
 		return nil, lastStatus, lastErr
 	}
-	return nil, lastStatus, fmt.Errorf("max retries exceeded for URL: %s", url)
+	return nil, lastStatus, fmt.Errorf("unexpected state: max retries exceeded")
 }
 
 // convertRegistryAPIToIndexResponse converts registry API response to mirror protocol IndexResponse
@@ -287,8 +330,8 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 func (uc *UpstreamClient) convertRegistryAPIToIndexResponse(data []byte) (*IndexResponse, *RegistryVersionsResponse, error) {
 	var registryResponse RegistryVersionsResponse
 
-	if err := json.Unmarshal(data, &registryResponse); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse registry API response: %w", err)
+	if err := parseJSON(data, &registryResponse, "registry API"); err != nil {
+		return nil, nil, err
 	}
 
 	// Convert to mirror protocol format
@@ -297,11 +340,7 @@ func (uc *UpstreamClient) convertRegistryAPIToIndexResponse(data []byte) (*Index
 		versions[v.Version] = VersionInfo{}
 	}
 
-	indexResponse := &IndexResponse{
-		Versions: versions,
-	}
-
-	return indexResponse, &registryResponse, nil
+	return &IndexResponse{Versions: versions}, &registryResponse, nil
 }
 
 // FetchDownloadURL fetches the download information for a specific provider version and platform
@@ -326,17 +365,13 @@ func (uc *UpstreamClient) FetchDownloadURL(ctx context.Context, hostname, namesp
 		return nil, err
 	}
 
-	if status == http.StatusNotFound {
-		return nil, ErrNotFound
-	}
-
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", status)
+	if statusErr := checkStatusCode(status); statusErr != nil {
+		return nil, statusErr
 	}
 
 	var info DownloadInfo
-	if err := json.Unmarshal(body, &info); err != nil {
-		return nil, fmt.Errorf("failed to parse download info: %w", err)
+	if err := parseJSON(body, &info, "download info"); err != nil {
+		return nil, err
 	}
 
 	uc.logger.DebugContext(ctx, "received download URL from registry",
