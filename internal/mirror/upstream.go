@@ -169,76 +169,18 @@ func (uc *UpstreamClient) FetchArchive(ctx context.Context, archiveURL string) (
 		return nil, fmt.Errorf("archive URL must have a host")
 	}
 
-	// Use fetch with retry logic, then return the response body directly
-	// Archives need to be streamed, so we can't use handleResponse
-	var lastErr error
-
-	for attempt := 0; attempt <= uc.maxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		resp, err := uc.httpClient.Do(req)
-		if err != nil {
-			lastErr = err
-			// Only retry on network errors if we have attempts left
-			if attempt < uc.maxRetries {
-				if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
-					return nil, backoffErr
-				}
-				continue
-			}
-			// Last attempt failed
-			return nil, fmt.Errorf("failed to fetch archive: %w", lastErr)
-		}
-
-		// Don't retry on client errors (4xx) - return immediately
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			resp.Body.Close()
-			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		// Handle success (2xx-3xx) or retry on server errors (5xx)
-		if uc.shouldRetry(resp.StatusCode, attempt) {
-			resp.Body.Close()
-			if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
-				return nil, backoffErr
-			}
-			lastErr = fmt.Errorf("server error: %d", resp.StatusCode)
-			continue
-		}
-
-		// Success (2xx-3xx)
-		if resp.StatusCode == http.StatusOK {
-			return resp.Body, nil
-		}
-
-		// Final attempt with non-OK status
-		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Should not reach here
-	if lastErr != nil {
-		return nil, fmt.Errorf("failed to fetch archive: %w", lastErr)
-	}
-	return nil, fmt.Errorf("unexpected state: max retries exceeded")
-}
-
-// handleResponse processes HTTP response and extracts body, with proper cleanup
-func (uc *UpstreamClient) handleResponse(resp *http.Response) ([]byte, error) {
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	resp, status, err := uc.doRequestWithRetry(ctx, archiveURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, err
 	}
-	return body, nil
-}
 
-// shouldRetry determines if a request should be retried based on status code
-func (uc *UpstreamClient) shouldRetry(statusCode int, attempt int) bool {
-	return statusCode >= 500 && attempt < uc.maxRetries
+	// Check for HTTP errors - return status code in error message
+	if status != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("unexpected status code: %d", status)
+	}
+
+	return resp.Body, nil
 }
 
 // exponentialBackoff waits for exponential backoff duration, respecting context cancellation
@@ -270,8 +212,10 @@ func parseJSON(data []byte, v interface{}, responseType string) error {
 	return nil
 }
 
-// fetch performs an HTTP GET request with retry logic
-func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, error) {
+// doRequestWithRetry performs an HTTP GET request with exponential backoff retry logic
+// Returns the HTTP response (caller is responsible for closing the body) and status code
+// Note: Returns response on both success (2xx-3xx) and client errors (4xx), only retries on server errors (5xx) or network errors
+func (uc *UpstreamClient) doRequestWithRetry(ctx context.Context, url string) (*http.Response, int, error) {
 	var lastErr error
 	var lastStatus int
 
@@ -284,6 +228,7 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 		resp, err := uc.httpClient.Do(req)
 		if err != nil {
 			lastErr = err
+			lastStatus = 0
 			// Only retry on network errors if we have attempts left
 			if attempt < uc.maxRetries {
 				if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
@@ -292,19 +237,18 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 				continue
 			}
 			// Last attempt failed
-			return nil, lastStatus, lastErr
+			return nil, 0, fmt.Errorf("failed to fetch: %w", lastErr)
 		}
 
 		lastStatus = resp.StatusCode
 
-		// Don't retry on client errors (4xx) - return immediately
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			body, err := uc.handleResponse(resp)
-			return body, resp.StatusCode, err
+		// Don't retry on client errors (4xx) or success (2xx-3xx) - return immediately
+		if resp.StatusCode < 500 {
+			return resp, resp.StatusCode, nil
 		}
 
-		// Handle success (2xx-3xx) or retry on server errors (5xx)
-		if uc.shouldRetry(resp.StatusCode, attempt) {
+		// For 5xx errors with retries left, backoff and retry
+		if attempt < uc.maxRetries {
 			resp.Body.Close()
 			if backoffErr := exponentialBackoff(ctx, attempt); backoffErr != nil {
 				return nil, resp.StatusCode, backoffErr
@@ -313,16 +257,31 @@ func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, e
 			continue
 		}
 
-		// Success (2xx-3xx) on this attempt, or final attempt with 5xx
-		body, err := uc.handleResponse(resp)
-		return body, resp.StatusCode, err
+		// Final attempt with 5xx error - return response for caller to handle
+		return resp, resp.StatusCode, nil
 	}
 
-	// Should not reach here, but handle gracefully
+	// Should not reach here
 	if lastErr != nil {
 		return nil, lastStatus, lastErr
 	}
 	return nil, lastStatus, fmt.Errorf("unexpected state: max retries exceeded")
+}
+
+// fetch performs an HTTP GET request with retry logic, returning the full response body
+func (uc *UpstreamClient) fetch(ctx context.Context, url string) ([]byte, int, error) {
+	resp, status, err := uc.doRequestWithRetry(ctx, url)
+	if err != nil {
+		return nil, status, err
+	}
+
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, status, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return body, status, nil
 }
 
 // convertRegistryAPIToIndexResponse converts registry API response to mirror protocol IndexResponse
